@@ -1,176 +1,190 @@
 package com.deadside.bot.parsers.fixes;
 
 import com.deadside.bot.db.models.GameServer;
+import com.deadside.bot.db.repositories.GameServerRepository;
 import com.deadside.bot.sftp.SftpConnector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.HashMap;
+import java.util.Map;
+
 /**
- * Hook for automatically repairing parser paths during execution
- * This class intercepts parser path access and resolves paths on demand
+ * Hook for parser path repair integration
  */
 public class ParserPathRepairHook {
     private static final Logger logger = LoggerFactory.getLogger(ParserPathRepairHook.class);
     
-    // SFTP connector reference
-    private static SftpConnector sftpConnector;
-    
-    // Flag to control automatic repair
-    private static boolean autoRepairEnabled = true;
+    private final SftpConnector connector;
+    private final GameServerRepository repository;
     
     /**
-     * Initialize the hook with dependencies
-     * @param sftpConnector SFTP connector
+     * Constructor
+     * @param connector The SFTP connector
+     * @param repository The game server repository
      */
-    public static void initialize(SftpConnector connector) {
-        sftpConnector = connector;
-        logger.info("ParserPathRepairHook initialized");
+    public ParserPathRepairHook(SftpConnector connector, GameServerRepository repository) {
+        this.connector = connector;
+        this.repository = repository;
     }
     
     /**
-     * Enable or disable automatic path repair
-     * @param enabled Whether to enable auto repair
-     */
-    public static void setAutoRepairEnabled(boolean enabled) {
-        autoRepairEnabled = enabled;
-        logger.info("Automatic path repair {}", enabled ? "enabled" : "disabled");
-    }
-    
-    /**
-     * Hook for getting CSV path
-     * This method intercepts CSV path access and resolves the path if needed
+     * Repair CSV paths for a server
      * @param server The game server
-     * @param originalPath The original path
-     * @return The resolved path, or original if resolution failed
+     * @return Repair results
      */
-    public static String getCsvPathHook(GameServer server, String originalPath) {
-        if (!autoRepairEnabled || server == null || sftpConnector == null) {
-            return originalPath;
-        }
+    public Map<String, Object> repairCsvPaths(GameServer server) {
+        Map<String, Object> results = new HashMap<>();
         
         try {
-            // Only try to resolve if the original path seems invalid
-            if (originalPath == null || originalPath.isEmpty() || 
-                (!originalPath.contains("/actual1/deathlogs") && 
-                 !originalPath.contains("\\actual1\\deathlogs") &&
-                 !originalPath.contains("/actual/deathlogs") && 
-                 !originalPath.contains("\\actual\\deathlogs"))) {
-                
-                logger.info("CSV path for server {} appears to be invalid, attempting to resolve", 
-                    server.getName());
-                
-                String resolvedPath = CsvParsingFix.resolveServerCsvPath(server, sftpConnector);
-                
-                if (resolvedPath != null && !resolvedPath.isEmpty() && 
-                    !resolvedPath.equals(originalPath)) {
-                    
-                    logger.info("Resolved CSV path during hook: {} -> {}", 
-                        originalPath, resolvedPath);
-                    
-                    return resolvedPath;
-                }
+            logger.info("Repairing CSV paths for server: {}", server.getName());
+            
+            // Validate connection
+            if (!connector.testConnection(server)) {
+                logger.error("Connection test failed for server: {}", server.getName());
+                results.put("error", "Connection test failed");
+                return results;
             }
             
-            return originalPath;
-        } catch (Exception e) {
-            logger.error("Error in CSV path hook: {}", e.getMessage(), e);
-            return originalPath;
-        }
-    }
-    
-    /**
-     * Hook for getting log path
-     * This method intercepts log path access and resolves the path if needed
-     * @param server The game server
-     * @param originalPath The original path
-     * @return The resolved path, or original if resolution failed
-     */
-    public static String getLogPathHook(GameServer server, String originalPath) {
-        if (!autoRepairEnabled || server == null || sftpConnector == null) {
-            return originalPath;
-        }
-        
-        try {
-            // Only try to resolve if the original path seems invalid
-            if (originalPath == null || originalPath.isEmpty() || 
-                (!originalPath.contains("/Logs") && !originalPath.contains("\\Logs"))) {
-                
-                logger.info("Log path for server {} appears to be invalid, attempting to resolve", 
-                    server.getName());
-                
-                String resolvedPath = LogParserFix.resolveServerLogPath(server, sftpConnector);
-                
-                if (resolvedPath != null && !resolvedPath.isEmpty() && 
-                    !resolvedPath.equals(originalPath)) {
-                    
-                    logger.info("Resolved log path during hook: {} -> {}", 
-                        originalPath, resolvedPath);
-                    
-                    return resolvedPath;
-                }
+            // Current path
+            String currentPath = server.getDeathlogsDirectory();
+            results.put("originalPath", currentPath);
+            
+            // Try to resolve path
+            String resolvedPath = CsvParsingFix.resolveServerCsvPath(server, connector);
+            
+            if (resolvedPath == null) {
+                logger.warn("Could not resolve CSV path for server: {}", server.getName());
+                results.put("resolved", false);
+                return results;
             }
             
-            return originalPath;
+            // Update server
+            boolean updated = CsvParsingFix.updateServerCsvPath(server, resolvedPath);
+            
+            if (updated) {
+                logger.info("Updated CSV path for server {}: {} -> {}", 
+                    server.getName(), currentPath, resolvedPath);
+                
+                results.put("resolved", true);
+                results.put("path", resolvedPath);
+                
+                // Save server
+                repository.save(server);
+                results.put("saved", true);
+            } else {
+                logger.warn("Failed to update CSV path for server: {}", server.getName());
+                results.put("resolved", false);
+                results.put("saved", false);
+            }
+            
+            return results;
         } catch (Exception e) {
-            logger.error("Error in log path hook: {}", e.getMessage(), e);
-            return originalPath;
+            logger.error("Error repairing CSV paths for server {}: {}", 
+                server.getName(), e.getMessage(), e);
+            
+            results.put("error", e.getMessage());
+            results.put("resolved", false);
+            results.put("saved", false);
+            
+            return results;
         }
     }
     
     /**
-     * Record a successful CSV path
-     * This method is called when a CSV path is successfully used
+     * Repair log paths for a server
      * @param server The game server
-     * @param path The successful path
+     * @return Repair results
      */
-    public static void recordSuccessfulCsvPath(GameServer server, String path) {
-        if (server == null || path == null || path.isEmpty()) {
-            return;
-        }
+    public Map<String, Object> repairLogPaths(GameServer server) {
+        Map<String, Object> results = new HashMap<>();
         
         try {
-            String serverKey = getServerKey(server);
+            logger.info("Repairing log paths for server: {}", server.getName());
             
-            // Add to CsvParsingFix cache
-            CsvParsingFix.resolveServerCsvPath(server, sftpConnector);
+            // Validate connection
+            if (!connector.testConnection(server)) {
+                logger.error("Connection test failed for server: {}", server.getName());
+                results.put("error", "Connection test failed");
+                return results;
+            }
             
-            logger.debug("Recorded successful CSV path for server {}: {}", 
-                server.getName(), path);
+            // Current path
+            String currentPath = server.getLogDirectory();
+            results.put("originalPath", currentPath);
+            
+            // Try to resolve path
+            String resolvedPath = LogParserFix.resolveServerLogPath(server, connector);
+            
+            if (resolvedPath == null) {
+                logger.warn("Could not resolve log path for server: {}", server.getName());
+                results.put("resolved", false);
+                return results;
+            }
+            
+            // Update server
+            boolean updated = LogParserFix.updateServerLogPath(server, resolvedPath);
+            
+            if (updated) {
+                logger.info("Updated log path for server {}: {} -> {}", 
+                    server.getName(), currentPath, resolvedPath);
+                
+                results.put("resolved", true);
+                results.put("path", resolvedPath);
+                
+                // Save server
+                repository.save(server);
+                results.put("saved", true);
+            } else {
+                logger.warn("Failed to update log path for server: {}", server.getName());
+                results.put("resolved", false);
+                results.put("saved", false);
+            }
+            
+            return results;
         } catch (Exception e) {
-            logger.error("Error recording successful CSV path: {}", e.getMessage(), e);
+            logger.error("Error repairing log paths for server {}: {}", 
+                server.getName(), e.getMessage(), e);
+            
+            results.put("error", e.getMessage());
+            results.put("resolved", false);
+            results.put("saved", false);
+            
+            return results;
         }
     }
     
     /**
-     * Record a successful log path
-     * This method is called when a log path is successfully used
+     * Quick check for CSV path
      * @param server The game server
-     * @param path The successful path
+     * @return True if path is valid
      */
-    public static void recordSuccessfulLogPath(GameServer server, String path) {
-        if (server == null || path == null || path.isEmpty()) {
-            return;
-        }
-        
+    public boolean isValidCsvPath(GameServer server) {
         try {
-            String serverKey = getServerKey(server);
-            
-            // Add to LogParserFix cache
-            LogParserFix.resolveServerLogPath(server, sftpConnector);
-            
-            logger.debug("Recorded successful log path for server {}: {}", 
-                server.getName(), path);
+            // Try to resolve path
+            String resolvedPath = CsvParsingFix.resolveServerCsvPath(server, connector);
+            return resolvedPath != null;
         } catch (Exception e) {
-            logger.error("Error recording successful log path: {}", e.getMessage(), e);
+            logger.error("Error checking CSV path for server {}: {}", 
+                server.getName(), e.getMessage(), e);
+            return false;
         }
     }
     
     /**
-     * Get a unique key for a server
-     * @param server The server
-     * @return The key
+     * Quick check for log path
+     * @param server The game server
+     * @return True if path is valid
      */
-    private static String getServerKey(GameServer server) {
-        return server.getGuildId() + ":" + server.getId();
+    public boolean isValidLogPath(GameServer server) {
+        try {
+            // Try to resolve path
+            String resolvedPath = LogParserFix.resolveServerLogPath(server, connector);
+            return resolvedPath != null;
+        } catch (Exception e) {
+            logger.error("Error checking log path for server {}: {}", 
+                server.getName(), e.getMessage(), e);
+            return false;
+        }
     }
 }

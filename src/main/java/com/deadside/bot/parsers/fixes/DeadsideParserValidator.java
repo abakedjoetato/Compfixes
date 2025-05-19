@@ -1,155 +1,173 @@
 package com.deadside.bot.parsers.fixes;
 
 import com.deadside.bot.db.models.GameServer;
-import com.deadside.bot.db.repositories.GameServerRepository;
-import com.deadside.bot.parsers.DeadsideCsvParser;
-import com.deadside.bot.parsers.DeadsideLogParser;
 import com.deadside.bot.sftp.SftpConnector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
- * Validator for Deadside parser components
- * This class provides functionality to validate the parser components
+ * Validator for Deadside parser configurations
+ * This class validates server configurations for proper operation
  */
 public class DeadsideParserValidator {
     private static final Logger logger = LoggerFactory.getLogger(DeadsideParserValidator.class);
     
     private final SftpConnector connector;
-    private final GameServerRepository serverRepository;
-    private final DeadsideCsvParser csvParser;
-    private final DeadsideLogParser logParser;
     
     /**
      * Constructor
      * @param connector The SFTP connector
-     * @param serverRepository The server repository
-     * @param csvParser The CSV parser
-     * @param logParser The log parser
      */
-    public DeadsideParserValidator(
-            SftpConnector connector,
-            GameServerRepository serverRepository,
-            DeadsideCsvParser csvParser,
-            DeadsideLogParser logParser) {
-        
+    public DeadsideParserValidator(SftpConnector connector) {
         this.connector = connector;
-        this.serverRepository = serverRepository;
-        this.csvParser = csvParser;
-        this.logParser = logParser;
     }
     
     /**
-     * Validate basic functionality of parser components
+     * Validate a server configuration
+     * @param server The game server to validate
+     * @return True if the server is valid
      */
-    public void validateBasicFunctionality() {
-        logger.info("Validating basic functionality of parser components");
-        
-        Map<String, Boolean> results = new HashMap<>();
-        
-        // Check if connector is available
-        results.put("connector", connector != null);
-        
-        // Check if repository is available
-        results.put("repository", serverRepository != null);
-        
-        // Check if parsers are available
-        results.put("csvParser", csvParser != null);
-        results.put("logParser", logParser != null);
-        
-        // Log results
-        for (Map.Entry<String, Boolean> entry : results.entrySet()) {
-            logger.info("Component {} validated: {}", entry.getKey(), entry.getValue());
-        }
-    }
-    
-    /**
-     * Validate path resolution
-     * @param serverId The server ID to validate
-     * @return True if validation passed
-     */
-    public boolean validatePathResolution(Long serverId) {
+    public boolean validateServer(GameServer server) {
         try {
-            logger.info("Validating path resolution for server ID: {}", serverId);
+            logger.info("Validating server: {}", server.getName());
             
-            // Find server
-            GameServer server = serverRepository.findById(serverId).orElse(null);
-            
-            if (server == null) {
-                logger.warn("Server not found: {}", serverId);
+            // Check for required fields
+            if (server.getId() == null) {
+                logger.error("Server {} has no ID", server.getName());
                 return false;
             }
             
-            // Create path finder
-            ParserPathFinder pathFinder = new ParserPathFinder(connector);
+            if (server.getGuildId() == null) {
+                logger.error("Server {} has no guild ID", server.getName());
+                return false;
+            }
             
-            // Find valid paths
-            String csvPath = pathFinder.findValidCsvPath(server);
-            String logPath = pathFinder.findValidLogPath(server);
+            if (server.getName() == null || server.getName().isEmpty()) {
+                logger.error("Server has no name");
+                return false;
+            }
             
-            // Log results
-            logger.info("Valid CSV path for server {}: {}", server.getName(), csvPath);
-            logger.info("Valid log path for server {}: {}", server.getName(), logPath);
+            // Get validation results
+            Map<String, Object> results = validateServerPaths(server);
             
-            return csvPath != null && logPath != null;
+            // Check CSV path
+            boolean csvPathValid = results.containsKey("csvPathValid") && (boolean)results.get("csvPathValid");
+            
+            // Check log path
+            boolean logPathValid = results.containsKey("logPathValid") && (boolean)results.get("logPathValid");
+            
+            // Overall validity
+            boolean valid = csvPathValid && logPathValid;
+            
+            if (valid) {
+                logger.info("Server {} is valid", server.getName());
+            } else {
+                logger.warn("Server {} is invalid", server.getName());
+            }
+            
+            return valid;
         } catch (Exception e) {
-            logger.error("Error validating path resolution: {}", e.getMessage(), e);
+            logger.error("Error validating server {}: {}", 
+                server.getName(), e.getMessage(), e);
             return false;
         }
     }
     
     /**
-     * Validate path resolution for all servers
-     * @return List of server IDs that passed validation
+     * Validate server paths
+     * @param server The game server
+     * @return Validation results
      */
-    public List<Long> validateAllServers() {
+    public Map<String, Object> validateServerPaths(GameServer server) {
+        Map<String, Object> results = new HashMap<>();
+        
         try {
-            logger.info("Validating path resolution for all servers");
+            logger.info("Validating paths for server: {}", server.getName());
             
-            // Find all servers
-            List<GameServer> servers = serverRepository.findAll();
+            // Check SFTP credentials
+            boolean credentialsValid = false;
             
-            if (servers == null || servers.isEmpty()) {
-                logger.warn("No servers found");
-                return new ArrayList<>();
+            if (server.getHost() == null || server.getHost().isEmpty()) {
+                logger.error("Server {} has no host", server.getName());
+            } else if (server.getPort() == null) {
+                logger.error("Server {} has no port", server.getName());
+            } else if (server.getUsername() == null || server.getUsername().isEmpty()) {
+                logger.error("Server {} has no username", server.getName());
+            } else if (server.getPassword() == null || server.getPassword().isEmpty()) {
+                logger.error("Server {} has no password", server.getName());
+            } else {
+                credentialsValid = true;
             }
             
-            List<Long> passedServers = new ArrayList<>();
+            results.put("credentialsValid", credentialsValid);
             
-            // Validate each server
-            for (GameServer server : servers) {
-                try {
-                    // Create path finder
-                    ParserPathFinder pathFinder = new ParserPathFinder(connector);
-                    
-                    // Find valid paths
-                    String csvPath = pathFinder.findValidCsvPath(server);
-                    String logPath = pathFinder.findValidLogPath(server);
-                    
-                    boolean passed = csvPath != null && logPath != null;
-                    
-                    if (passed) {
-                        passedServers.add(Long.parseLong(server.getId().toString()));
-                    }
-                    
-                    // Log results
-                    logger.info("Server {} validated: {}", server.getName(), passed);
-                } catch (Exception e) {
-                    logger.error("Error validating server {}: {}", server.getName(), e.getMessage(), e);
-                }
+            if (!credentialsValid) {
+                logger.error("Server {} has invalid SFTP credentials", server.getName());
+                results.put("csvPathValid", false);
+                results.put("logPathValid", false);
+                return results;
             }
             
-            logger.info("Validated {}/{} servers", passedServers.size(), servers.size());
+            // Test connection
+            if (!connector.testConnection(server)) {
+                logger.error("Could not connect to server {}", server.getName());
+                results.put("csvPathValid", false);
+                results.put("logPathValid", false);
+                return results;
+            }
             
-            return passedServers;
+            // Check CSV path
+            String csvPath = server.getDeathlogsDirectory();
+            boolean csvPathValid = csvPath != null && !csvPath.isEmpty();
+            
+            if (csvPathValid) {
+                // Check if path exists
+                boolean csvPathExists = connector.isValidCsvPath(server);
+                results.put("csvPathExists", csvPathExists);
+                
+                // Validate path only if it exists
+                csvPathValid = csvPathExists;
+            }
+            
+            results.put("csvPath", csvPath);
+            results.put("csvPathValid", csvPathValid);
+            
+            // Check log path
+            String logPath = server.getLogDirectory();
+            boolean logPathValid = logPath != null && !logPath.isEmpty();
+            
+            if (logPathValid) {
+                // Check if path exists
+                boolean logPathExists = connector.isValidLogPath(server);
+                results.put("logPathExists", logPathExists);
+                
+                // Validate path only if it exists
+                logPathValid = logPathExists;
+            }
+            
+            results.put("logPath", logPath);
+            results.put("logPathValid", logPathValid);
+            
+            // Overall validity
+            results.put("pathsValid", csvPathValid && logPathValid);
+            
+            logger.info("Path validation for server {}: CSV path valid: {}, Log path valid: {}", 
+                server.getName(), csvPathValid, logPathValid);
+            
+            return results;
         } catch (Exception e) {
-            logger.error("Error validating all servers: {}", e.getMessage(), e);
-            return new ArrayList<>();
+            logger.error("Error validating paths for server {}: {}", 
+                server.getName(), e.getMessage(), e);
+            
+            results.put("error", e.getMessage());
+            results.put("csvPathValid", false);
+            results.put("logPathValid", false);
+            results.put("pathsValid", false);
+            
+            return results;
         }
     }
 }

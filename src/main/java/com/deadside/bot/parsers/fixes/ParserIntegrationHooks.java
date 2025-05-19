@@ -4,15 +4,19 @@ import com.deadside.bot.db.models.GameServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Integration hooks for parser fixes
- * This class provides static methods for integration with other components
+ * Hooks for parser integration
+ * This class provides a central point for parser integrations
  */
 public class ParserIntegrationHooks {
     private static final Logger logger = LoggerFactory.getLogger(ParserIntegrationHooks.class);
+    
+    // Path caches
+    private static final Map<String, Map<String, String>> serverPathCache = new ConcurrentHashMap<>();
     
     /**
      * Record a successful CSV path for a server
@@ -24,17 +28,15 @@ public class ParserIntegrationHooks {
             return;
         }
         
-        try {
-            // Register the path in the registry
-            DeadsideParserPathRegistry.getInstance().registerPath(
-                server, DeadsideParserPathRegistry.PATH_TYPE_CSV, path);
-            
-            logger.info("Recorded successful CSV path for server {}: {}", 
-                server.getName(), path);
-        } catch (Exception e) {
-            logger.error("Error recording successful CSV path for server {}: {}", 
-                server.getName(), e.getMessage(), e);
-        }
+        String serverId = server.getId().toString();
+        
+        // Get or create server cache
+        Map<String, String> serverCache = serverPathCache.computeIfAbsent(serverId, k -> new HashMap<>());
+        
+        // Store path
+        serverCache.put("csvPath", path);
+        
+        logger.info("Recorded successful CSV path for server {}: {}", server.getName(), path);
     }
     
     /**
@@ -47,138 +49,144 @@ public class ParserIntegrationHooks {
             return;
         }
         
+        String serverId = server.getId().toString();
+        
+        // Get or create server cache
+        Map<String, String> serverCache = serverPathCache.computeIfAbsent(serverId, k -> new HashMap<>());
+        
+        // Store path
+        serverCache.put("logPath", path);
+        
+        logger.info("Recorded successful log path for server {}: {}", server.getName(), path);
+    }
+    
+    /**
+     * Check if a server has a valid path
+     * @param server The game server
+     * @return True if the server has a valid path
+     */
+    public static boolean isValidPath(GameServer server) {
+        if (server == null) {
+            return false;
+        }
+        
         try {
-            // Register the path in the registry
-            DeadsideParserPathRegistry.getInstance().registerPath(
-                server, DeadsideParserPathRegistry.PATH_TYPE_LOGS, path);
+            // Check deathlog directory
+            String deathlogsDir = server.getDeathlogsDirectory();
+            if (deathlogsDir == null || deathlogsDir.isEmpty()) {
+                return false;
+            }
             
-            logger.info("Recorded successful log path for server {}: {}", 
-                server.getName(), path);
+            // Check log directory
+            String logDir = server.getLogDirectory();
+            if (logDir == null || logDir.isEmpty()) {
+                return false;
+            }
+            
+            return true;
         } catch (Exception e) {
-            logger.error("Error recording successful log path for server {}: {}", 
+            logger.error("Error checking if server {} has valid path: {}", 
                 server.getName(), e.getMessage(), e);
+            return false;
         }
     }
     
     /**
-     * Get a registered CSV path for a server
+     * Check if a server has a cached path
      * @param server The game server
-     * @return The path, or null if not registered
+     * @return True if the server has a cached path
      */
-    public static String getRegisteredCsvPath(GameServer server) {
+    public static boolean hasCachedPath(GameServer server) {
         if (server == null) {
-            return null;
+            return false;
         }
         
-        try {
-            // Get the path from the registry
-            return DeadsideParserPathRegistry.getInstance().getPath(
-                server, DeadsideParserPathRegistry.PATH_TYPE_CSV);
-        } catch (Exception e) {
-            logger.error("Error getting registered CSV path for server {}: {}", 
-                server.getName(), e.getMessage(), e);
-            return null;
+        String serverId = server.getId().toString();
+        
+        // Check if server is in cache
+        if (!serverPathCache.containsKey(serverId)) {
+            return false;
         }
+        
+        // Get server cache
+        Map<String, String> serverCache = serverPathCache.get(serverId);
+        
+        // Check if paths are in cache
+        return serverCache.containsKey("csvPath") && serverCache.containsKey("logPath");
     }
     
     /**
-     * Get a registered log path for a server
+     * Get cached CSV path for a server
      * @param server The game server
-     * @return The path, or null if not registered
+     * @return The cached CSV path, or null if not found
      */
-    public static String getRegisteredLogPath(GameServer server) {
+    public static String getCachedCsvPath(GameServer server) {
         if (server == null) {
             return null;
         }
         
-        try {
-            // Get the path from the registry
-            return DeadsideParserPathRegistry.getInstance().getPath(
-                server, DeadsideParserPathRegistry.PATH_TYPE_LOGS);
-        } catch (Exception e) {
-            logger.error("Error getting registered log path for server {}: {}", 
-                server.getName(), e.getMessage(), e);
+        String serverId = server.getId().toString();
+        
+        // Check if server is in cache
+        if (!serverPathCache.containsKey(serverId)) {
             return null;
         }
+        
+        // Get server cache
+        Map<String, String> serverCache = serverPathCache.get(serverId);
+        
+        // Return CSV path
+        return serverCache.get("csvPath");
     }
     
     /**
-     * Get recommended CSV paths for a server
+     * Get cached log path for a server
      * @param server The game server
-     * @return List of recommended paths
+     * @return The cached log path, or null if not found
      */
-    public static List<String> getRecommendedCsvPaths(GameServer server) {
+    public static String getCachedLogPath(GameServer server) {
         if (server == null) {
-            return new ArrayList<>();
+            return null;
         }
         
-        try {
-            List<String> paths = new ArrayList<>();
-            
-            // Get server properties
-            String host = server.getSftpHost();
-            if (host == null || host.isEmpty()) {
-                host = server.getHost();
-            }
-            
-            String serverName = server.getServerId();
-            if (serverName == null || serverName.isEmpty()) {
-                serverName = server.getName().replaceAll("\\s+", "_");
-            }
-            
-            // Add recommended paths
-            paths.add(host + "_" + serverName + "/actual1/deathlogs");
-            paths.add(host + "_" + serverName + "/actual/deathlogs");
-            paths.add(host + "/" + serverName + "/actual1/deathlogs");
-            paths.add(host + "/" + serverName + "/actual/deathlogs");
-            paths.add(serverName + "/actual1/deathlogs");
-            paths.add(serverName + "/actual/deathlogs");
-            
-            return paths;
-        } catch (Exception e) {
-            logger.error("Error getting recommended CSV paths for server {}: {}", 
-                server.getName(), e.getMessage(), e);
-            return new ArrayList<>();
+        String serverId = server.getId().toString();
+        
+        // Check if server is in cache
+        if (!serverPathCache.containsKey(serverId)) {
+            return null;
         }
+        
+        // Get server cache
+        Map<String, String> serverCache = serverPathCache.get(serverId);
+        
+        // Return log path
+        return serverCache.get("logPath");
     }
     
     /**
-     * Get recommended log paths for a server
+     * Clear path cache for a server
      * @param server The game server
-     * @return List of recommended paths
      */
-    public static List<String> getRecommendedLogPaths(GameServer server) {
+    public static void clearPathCache(GameServer server) {
         if (server == null) {
-            return new ArrayList<>();
+            return;
         }
         
-        try {
-            List<String> paths = new ArrayList<>();
-            
-            // Get server properties
-            String host = server.getSftpHost();
-            if (host == null || host.isEmpty()) {
-                host = server.getHost();
-            }
-            
-            String serverName = server.getServerId();
-            if (serverName == null || serverName.isEmpty()) {
-                serverName = server.getName().replaceAll("\\s+", "_");
-            }
-            
-            // Add recommended paths
-            paths.add(host + "_" + serverName + "/Logs");
-            paths.add(host + "_" + serverName + "/Deadside/Logs");
-            paths.add(host + "/" + serverName + "/Logs");
-            paths.add(host + "/" + serverName + "/Deadside/Logs");
-            paths.add(serverName + "/Logs");
-            paths.add(serverName + "/Deadside/Logs");
-            
-            return paths;
-        } catch (Exception e) {
-            logger.error("Error getting recommended log paths for server {}: {}", 
-                server.getName(), e.getMessage(), e);
-            return new ArrayList<>();
-        }
+        String serverId = server.getId().toString();
+        
+        // Remove server from cache
+        serverPathCache.remove(serverId);
+        
+        logger.info("Cleared path cache for server: {}", server.getName());
+    }
+    
+    /**
+     * Clear all path caches
+     */
+    public static void clearAllPathCaches() {
+        // Clear all caches
+        serverPathCache.clear();
+        
+        logger.info("Cleared all path caches");
     }
 }

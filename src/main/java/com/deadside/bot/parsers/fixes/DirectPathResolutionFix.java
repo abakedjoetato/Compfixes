@@ -10,8 +10,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Direct path resolution fix for Deadside parser issues
- * This class provides direct path resolution for servers
+ * Direct path resolution fix for servers
  */
 public class DirectPathResolutionFix {
     private static final Logger logger = LoggerFactory.getLogger(DirectPathResolutionFix.class);
@@ -27,9 +26,17 @@ public class DirectPathResolutionFix {
     }
     
     /**
+     * Initialize the fix
+     */
+    public void initialize() {
+        logger.info("Initializing DirectPathResolutionFix");
+        // No initialization required for now
+    }
+    
+    /**
      * Fix paths for a server
      * @param server The game server
-     * @return Map of results
+     * @return The resolution results
      */
     public Map<String, Object> fixServerPaths(GameServer server) {
         Map<String, Object> results = new HashMap<>();
@@ -37,63 +44,30 @@ public class DirectPathResolutionFix {
         try {
             logger.info("Fixing paths for server: {}", server.getName());
             
-            // Test connection
-            boolean connectionOk = connector.testConnection(server);
+            // Store original paths
+            String originalCsvPath = server.getDeathlogsDirectory();
+            String originalLogPath = server.getLogDirectory();
             
-            if (!connectionOk) {
+            results.put("originalCsvPath", originalCsvPath);
+            results.put("originalLogPath", originalLogPath);
+            
+            // Test connection
+            if (!connector.testConnection(server)) {
                 logger.error("Connection test failed for server: {}", server.getName());
                 results.put("error", "Connection test failed");
+                results.put("pathsFixed", false);
                 return results;
             }
             
-            // Try to find valid CSV path
-            boolean csvPathFixed = false;
-            String csvPath = SftpPathUtils.findCsvPath(server, connector);
-            
-            if (csvPath != null) {
-                logger.info("Found valid CSV path for server {}: {}", 
-                    server.getName(), csvPath);
-                
-                // Update server
-                String originalCsvPath = server.getDeathlogsDirectory();
-                server.setDeathlogsDirectory(csvPath);
-                
-                // Register path
-                ParserIntegrationHooks.recordSuccessfulCsvPath(server, csvPath);
-                
-                csvPathFixed = true;
-                results.put("csvPath", csvPath);
-                results.put("originalCsvPath", originalCsvPath);
-            } else {
-                logger.warn("Could not find valid CSV path for server: {}", 
-                    server.getName());
-            }
-            
-            // Try to find valid log path
-            boolean logPathFixed = false;
-            String logPath = SftpPathUtils.findLogPath(server, connector);
-            
-            if (logPath != null) {
-                logger.info("Found valid log path for server {}: {}", 
-                    server.getName(), logPath);
-                
-                // Update server
-                String originalLogPath = server.getLogDirectory();
-                server.setLogDirectory(logPath);
-                
-                // Register path
-                ParserIntegrationHooks.recordSuccessfulLogPath(server, logPath);
-                
-                logPathFixed = true;
-                results.put("logPath", logPath);
-                results.put("originalLogPath", originalLogPath);
-            } else {
-                logger.warn("Could not find valid log path for server: {}", 
-                    server.getName());
-            }
-            
+            // Try to fix CSV path
+            boolean csvPathFixed = fixCsvPath(server, results);
             results.put("csvPathFixed", csvPathFixed);
+            
+            // Try to fix log path
+            boolean logPathFixed = fixLogPath(server, results);
             results.put("logPathFixed", logPathFixed);
+            
+            // Overall status
             results.put("pathsFixed", csvPathFixed || logPathFixed);
             
             return results;
@@ -102,56 +76,116 @@ public class DirectPathResolutionFix {
                 server.getName(), e.getMessage(), e);
             
             results.put("error", e.getMessage());
+            results.put("csvPathFixed", false);
+            results.put("logPathFixed", false);
+            results.put("pathsFixed", false);
+            
             return results;
         }
     }
     
     /**
-     * Apply server path updates
-     * @param server The game server
-     * @param results The results map
-     * @return Updated server
+     * Apply server updates from results
+     * @param server The game server to update
+     * @param results The fix results
+     * @return The updated server
      */
     public GameServer applyServerUpdates(GameServer server, Map<String, Object> results) {
         try {
-            // Check if updates needed
-            boolean pathsFixed = results.containsKey("pathsFixed") && 
-                (boolean)results.get("pathsFixed");
-            
-            if (!pathsFixed) {
-                logger.warn("No paths fixed for server: {}", server.getName());
-                return server;
-            }
-            
-            // Apply CSV path update
-            boolean csvPathFixed = results.containsKey("csvPathFixed") && 
-                (boolean)results.get("csvPathFixed");
-            
-            if (csvPathFixed && results.containsKey("csvPath")) {
+            // Apply CSV path
+            if (results.containsKey("csvPathFixed") && (boolean)results.get("csvPathFixed")) {
                 String csvPath = (String)results.get("csvPath");
                 server.setDeathlogsDirectory(csvPath);
-                
-                logger.info("Updated CSV path for server {}: {}", 
-                    server.getName(), csvPath);
+                logger.info("Updated CSV path for server {}: {}", server.getName(), csvPath);
             }
             
-            // Apply log path update
-            boolean logPathFixed = results.containsKey("logPathFixed") && 
-                (boolean)results.get("logPathFixed");
-            
-            if (logPathFixed && results.containsKey("logPath")) {
+            // Apply log path
+            if (results.containsKey("logPathFixed") && (boolean)results.get("logPathFixed")) {
                 String logPath = (String)results.get("logPath");
                 server.setLogDirectory(logPath);
-                
-                logger.info("Updated log path for server {}: {}", 
-                    server.getName(), logPath);
+                logger.info("Updated log path for server {}: {}", server.getName(), logPath);
             }
             
             return server;
         } catch (Exception e) {
-            logger.error("Error applying server updates for server {}: {}", 
-                server.getName(), e.getMessage(), e);
+            logger.error("Error applying server updates: {}", e.getMessage(), e);
             return server;
+        }
+    }
+    
+    /**
+     * Fix CSV path for a server
+     * @param server The game server
+     * @param results The results map
+     * @return True if the path was fixed
+     */
+    private boolean fixCsvPath(GameServer server, Map<String, Object> results) {
+        try {
+            // Current path
+            String currentPath = server.getDeathlogsDirectory();
+            logger.info("Current CSV path for server {}: {}", server.getName(), currentPath);
+            
+            // Try to resolve path
+            String resolvedPath = SftpPathUtils.findCsvPath(server, connector);
+            
+            if (resolvedPath == null) {
+                logger.warn("Could not resolve CSV path for server: {}", server.getName());
+                return false;
+            }
+            
+            // Check if path changed
+            boolean pathChanged = !resolvedPath.equals(currentPath);
+            
+            // Store results
+            results.put("csvPath", resolvedPath);
+            results.put("csvPathChanged", pathChanged);
+            
+            logger.info("Resolved CSV path for server {}: {} (changed: {})", 
+                server.getName(), resolvedPath, pathChanged);
+            
+            return true;
+        } catch (Exception e) {
+            logger.error("Error fixing CSV path for server {}: {}", 
+                server.getName(), e.getMessage(), e);
+            return false;
+        }
+    }
+    
+    /**
+     * Fix log path for a server
+     * @param server The game server
+     * @param results The results map
+     * @return True if the path was fixed
+     */
+    private boolean fixLogPath(GameServer server, Map<String, Object> results) {
+        try {
+            // Current path
+            String currentPath = server.getLogDirectory();
+            logger.info("Current log path for server {}: {}", server.getName(), currentPath);
+            
+            // Try to resolve path
+            String resolvedPath = SftpPathUtils.findLogPath(server, connector);
+            
+            if (resolvedPath == null) {
+                logger.warn("Could not resolve log path for server: {}", server.getName());
+                return false;
+            }
+            
+            // Check if path changed
+            boolean pathChanged = !resolvedPath.equals(currentPath);
+            
+            // Store results
+            results.put("logPath", resolvedPath);
+            results.put("logPathChanged", pathChanged);
+            
+            logger.info("Resolved log path for server {}: {} (changed: {})", 
+                server.getName(), resolvedPath, pathChanged);
+            
+            return true;
+        } catch (Exception e) {
+            logger.error("Error fixing log path for server {}: {}", 
+                server.getName(), e.getMessage(), e);
+            return false;
         }
     }
 }
