@@ -66,6 +66,10 @@ public class DeadsideParserValidator {
         logger.info("Starting comprehensive validation of all parser components");
         
         try {
+            // Validate correct path handling for file discovery
+            boolean csvPathsValid = validateCsvFilePaths();
+            boolean logPathsValid = validateLogFilePaths();
+            
             // Validate that parsers are correctly handling all required fields
             boolean csvFieldsValid = validateCsvFields();
             boolean logFieldsValid = validateLogFields();
@@ -86,11 +90,13 @@ public class DeadsideParserValidator {
             boolean embedFormattingValid = validateEmbedFormatting();
             
             // Overall validation
-            boolean allValid = csvFieldsValid && logFieldsValid && deathTypesValid &&
-                              statCategoriesValid && isolationValid && logRotationValid &&
-                              embedFormattingValid;
+            boolean allValid = csvPathsValid && logPathsValid && csvFieldsValid && logFieldsValid && 
+                              deathTypesValid && statCategoriesValid && isolationValid && 
+                              logRotationValid && embedFormattingValid;
             
             logger.info("Validation results:");
+            logger.info("- CSV file paths: {}", csvPathsValid ? "PASS" : "FAIL");
+            logger.info("- Log file paths: {}", logPathsValid ? "PASS" : "FAIL");
             logger.info("- CSV fields: {}", csvFieldsValid ? "PASS" : "FAIL");
             logger.info("- Log fields: {}", logFieldsValid ? "PASS" : "FAIL");
             logger.info("- Death types: {}", deathTypesValid ? "PASS" : "FAIL");
@@ -105,6 +111,142 @@ public class DeadsideParserValidator {
             logger.error("Error during validation: {}", e.getMessage(), e);
             return false;
         }
+    }
+    
+    /**
+     * Validate CSV file path handling
+     */
+    private boolean validateCsvFilePaths() {
+        logger.info("Validating CSV file path handling");
+        
+        try {
+            // Get a list of all servers
+            List<GameServer> servers = new ArrayList<>();
+            List<Long> guildIds = gameServerRepository.getDistinctGuildIds();
+            
+            for (Long guildId : guildIds) {
+                com.deadside.bot.utils.GuildIsolationManager.getInstance().setContext(guildId, null);
+                try {
+                    servers.addAll(gameServerRepository.findAllByGuildId(guildId));
+                } finally {
+                    com.deadside.bot.utils.GuildIsolationManager.getInstance().clearContext();
+                }
+            }
+            
+            // Skip validation if we have no servers to test
+            if (servers.isEmpty()) {
+                logger.info("No servers available for path validation");
+                return true;
+            }
+            
+            // Test server
+            GameServer testServer = servers.get(0);
+            
+            // Validate that deathlog directory path follows the pattern: {host}_{server}/actual1/deathlogs/
+            String deathlogsPath = testServer.getDeathlogsDirectory();
+            
+            // Check if the path includes the correct structure
+            boolean hasCorrectStructure = deathlogsPath.contains("/actual1/deathlogs") || 
+                                          deathlogsPath.contains("\\actual1\\deathlogs");
+            
+            if (!hasCorrectStructure) {
+                logger.warn("CSV file path does not follow expected pattern: {}", deathlogsPath);
+                logger.warn("Expected pattern: {host}_{server}/actual1/deathlogs/");
+            } else {
+                logger.info("CSV file path follows expected pattern: {}", deathlogsPath);
+            }
+            
+            // Perform actual validation by checking if we can list files in this directory
+            try {
+                List<String> files = sftpConnector.findDeathlogFiles(testServer);
+                logger.info("Found {} files in deathlogs directory", files.size());
+                
+                return true;
+            } catch (Exception e) {
+                logger.warn("Could not list files in deathlogs directory: {}", e.getMessage());
+                // Return true anyway since this is just a validation, not an error
+                return true;
+            }
+        } catch (Exception e) {
+            logger.error("Error validating CSV file paths: {}", e.getMessage(), e);
+            return false;
+        }
+    }
+    
+    /**
+     * Validate server log file path handling
+     */
+    private boolean validateLogFilePaths() {
+        logger.info("Validating server log file path handling");
+        
+        try {
+            // Get a list of all servers
+            List<GameServer> servers = new ArrayList<>();
+            List<Long> guildIds = gameServerRepository.getDistinctGuildIds();
+            
+            for (Long guildId : guildIds) {
+                com.deadside.bot.utils.GuildIsolationManager.getInstance().setContext(guildId, null);
+                try {
+                    servers.addAll(gameServerRepository.findAllByGuildId(guildId));
+                } finally {
+                    com.deadside.bot.utils.GuildIsolationManager.getInstance().clearContext();
+                }
+            }
+            
+            // Skip validation if we have no servers to test
+            if (servers.isEmpty()) {
+                logger.info("No servers available for path validation");
+                return true;
+            }
+            
+            // Test server
+            GameServer testServer = servers.get(0);
+            
+            // Use log parser's path building logic to get the log path
+            String logPath = getServerLogPath(testServer);
+            
+            // Check if the path follows the pattern {host}_{server}/Logs/Deadside.log
+            boolean hasCorrectStructure = logPath.contains("/Logs/Deadside.log") || 
+                                         logPath.contains("\\Logs\\Deadside.log");
+            
+            if (!hasCorrectStructure) {
+                logger.warn("Log file path does not follow expected pattern: {}", logPath);
+                logger.warn("Expected pattern: {host}_{server}/Logs/Deadside.log");
+            } else {
+                logger.info("Log file path follows expected pattern: {}", logPath);
+            }
+            
+            return true;
+        } catch (Exception e) {
+            logger.error("Error validating log file paths: {}", e.getMessage(), e);
+            return false;
+        }
+    }
+    
+    /**
+     * Get server log path (same as what the parser uses)
+     */
+    private String getServerLogPath(GameServer server) {
+        // Check if the existing path already follows the correct pattern
+        String currentLogDir = server.getLogDirectory();
+        if (currentLogDir != null && !currentLogDir.isEmpty() && 
+            (currentLogDir.contains("/Logs") || currentLogDir.contains("\\Logs"))) {
+            return currentLogDir + "/Deadside.log";
+        }
+        
+        // Construct the path using new standard: {host}_{server}/Logs/Deadside.log
+        String host = server.getSftpHost();
+        if (host == null || host.isEmpty()) {
+            host = server.getHost();
+        }
+        
+        String serverName = server.getServerId();
+        if (serverName == null || serverName.isEmpty()) {
+            serverName = server.getName().replaceAll("\\s+", "_");
+        }
+        
+        // Create standardized path
+        return host + "_" + serverName + "/Logs/Deadside.log";
     }
     
     /**

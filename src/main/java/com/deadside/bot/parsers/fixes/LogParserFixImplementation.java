@@ -162,9 +162,18 @@ public class LogParserFixImplementation {
             // Read new lines from the log file
             List<String> newLines;
             try {
-                newLines = sftpConnector.readLinesAfter(server, logPath, lastLine);
+                // Try multiple paths with robust fallback mechanisms
+                try {
+                    // First try with standard readLinesAfter method
+                    newLines = sftpConnector.readLinesAfter(server, logPath, lastLine);
+                } catch (Exception e) {
+                    // If standard approach fails, try with readLogLinesAfter which has fallback paths
+                    logger.info("Standard path failed for log file, trying enhanced path resolution");
+                    newLines = sftpConnector.readLogLinesAfter(server, "Deadside.log", lastLine);
+                }
                 
                 if (newLines.isEmpty()) {
+                    logger.debug("No new lines found in log file for server {}", server.getName());
                     return;
                 }
                 
@@ -173,6 +182,11 @@ public class LogParserFixImplementation {
                 
                 // Process the new lines with improved event detection
                 processLogLinesWithImprovedEventDetection(server, newLines);
+                
+                // If we successfully processed lines, update the server's log tracking
+                server.setLastProcessedLogFile("Deadside.log");
+                server.setLastProcessedLogLine(lastLine + newLines.size());
+                server.setLastProcessedTimestamp(System.currentTimeMillis());
                 
                 // Check for rotation indicators within the content
                 detectRotationIndicatorsInContent(server, newLines);
@@ -214,11 +228,24 @@ public class LogParserFixImplementation {
     }
     
     /**
-     * Detect rotation indicators in log content
+     * Detect rotation indicators in log content with enhanced pattern matching
      */
     private void detectRotationIndicatorsInContent(GameServer server, List<String> lines) {
+        // Known log rotation indicators
+        // 1. Explicit log file opened message
+        // 2. Server initialization message
+        // 3. Server startup command line
+        // 4. Process started message
+        // 5. Log system initialized message
         for (String line : lines) {
-            if (LOG_ROTATION_PATTERN.matcher(line).find() || SERVER_RESTART_PATTERN.matcher(line).find()) {
+            if (LOG_ROTATION_PATTERN.matcher(line).find() || 
+                SERVER_RESTART_PATTERN.matcher(line).find() ||
+                line.contains("Log file") && line.contains("opened") ||
+                line.contains("Server initialization started") ||
+                line.contains("Started with command line:") ||
+                line.contains("Process started") ||
+                line.contains("Log system initialized")) {
+                
                 logger.info("Log rotation indicator found in content for server {}: {}", server.getName(), line);
                 
                 // Update rotation timestamp and reset counter
@@ -226,11 +253,30 @@ public class LogParserFixImplementation {
                 lastLineProcessed.put(server.getName(), 0);
                 gameServerRepository.save(server);
                 
-                // Send server restart notification
+                // Extract timestamp if present
                 Matcher timestampMatcher = TIMESTAMP_PATTERN.matcher(line);
                 String timestamp = timestampMatcher.find() ? timestampMatcher.group(1) : "";
                 
+                // Send server restart notification
                 sendServerRestartNotification(server, timestamp);
+                
+                // Find the most recent line that has a timestamp
+                if (timestamp.isEmpty() && !lines.isEmpty()) {
+                    for (String recentLine : lines) {
+                        Matcher matcher = TIMESTAMP_PATTERN.matcher(recentLine);
+                        if (matcher.find()) {
+                            timestamp = matcher.group(1);
+                            break;
+                        }
+                    }
+                }
+                
+                // Log the rotation event with timestamp information
+                logger.info("Log rotation detected for server {} at {} (current time: {})", 
+                    server.getName(), 
+                    timestamp.isEmpty() ? "unknown time" : timestamp,
+                    new Date());
+                
                 break;
             }
         }
@@ -434,7 +480,26 @@ public class LogParserFixImplementation {
      * Get the path to the server log file
      */
     private String getServerLogPath(GameServer server) {
-        return server.getLogDirectory() + "/Deadside.log";
+        // Check if the existing path already follows the correct pattern
+        String currentLogDir = server.getLogDirectory();
+        if (currentLogDir != null && !currentLogDir.isEmpty() && 
+            (currentLogDir.contains("/Logs") || currentLogDir.contains("\\Logs"))) {
+            return currentLogDir + "/Deadside.log";
+        }
+        
+        // Construct the path using new standard: {host}_{server}/Logs/Deadside.log
+        String host = server.getSftpHost();
+        if (host == null || host.isEmpty()) {
+            host = server.getHost();
+        }
+        
+        String serverName = server.getServerId();
+        if (serverName == null || serverName.isEmpty()) {
+            serverName = server.getName().replaceAll("\\s+", "_");
+        }
+        
+        // Create standardized path
+        return host + "_" + serverName + "/Logs/Deadside.log";
     }
     
     /**

@@ -94,9 +94,26 @@ public class CsvParserFixImplementation {
                     csvFile, server.getName(), processHistorical ? "yes" : "no");
                 
                 try {
-                    // Get file content
-                    String content = sftpConnector.getFileContent(server, 
-                        server.getDeathlogsDirectory() + "/" + csvFile);
+                    // Build the path properly with directory resolution fallbacks
+                    String filePath = server.getDeathlogsDirectory() + "/" + csvFile;
+                    
+                    // Try to get content with enhanced path resolution
+                    String content = null;
+                    
+                    try {
+                        // First try using the standard method
+                        content = sftpConnector.readDeathlogFile(server, csvFile);
+                    } catch (Exception e) {
+                        // If that fails, try direct file content retrieval with robust error handling
+                        logger.info("Standard readDeathlogFile failed for {}, trying alternative methods", csvFile);
+                        content = sftpConnector.getFileContent(server, filePath);
+                    }
+                    
+                    if (content == null || content.trim().isEmpty()) {
+                        logger.warn("Empty or null content retrieved for CSV file: {}", csvFile);
+                        processed.add(csvFile); // Mark as processed to avoid repeated attempts
+                        continue;
+                    }
                     
                     // Process the content with comprehensive validation
                     int deathsProcessed = processValidatedContent(server, content);
@@ -109,7 +126,7 @@ public class CsvParserFixImplementation {
                     server.setLastProcessedKillfeedFile(csvFile);
                     server.setLastProcessedKillfeedLine(deathsProcessed);
                     
-                    logger.info("Processed {} deaths from file {} for server {}", 
+                    logger.info("Successfully processed {} deaths from file {} for server {}", 
                         deathsProcessed, csvFile, server.getName());
                 } catch (Exception e) {
                     logger.error("Error processing CSV file {}: {}", csvFile, e.getMessage(), e);
@@ -204,21 +221,32 @@ public class CsvParserFixImplementation {
             
             logger.info("Processing historical data for server: {}", server.getName());
             
-            // Get CSV files
-            File deathlogsDir = new File(server.getDeathlogsDirectory());
-            if (!deathlogsDir.exists() || !deathlogsDir.isDirectory()) {
-                logger.warn("Deathlog directory does not exist: {}", server.getDeathlogsDirectory());
+            // Fetch CSV files with enhanced path handling
+            List<String> csvFiles = new ArrayList<>();
+            try {
+                csvFiles = sftpConnector.findDeathlogFiles(server);
+                
+                if (csvFiles.isEmpty()) {
+                    // Try local filesystem as fallback
+                    File deathlogsDir = new File(server.getDeathlogsDirectory());
+                    if (deathlogsDir.exists() && deathlogsDir.isDirectory()) {
+                        for (File file : deathlogsDir.listFiles()) {
+                            if (file.getName().endsWith(".csv")) {
+                                csvFiles.add(file.getName());
+                            }
+                        }
+                    } else {
+                        logger.warn("Deathlog directory does not exist locally or via SFTP: {}", 
+                            server.getDeathlogsDirectory());
+                        errorCount.incrementAndGet();
+                    }
+                }
+            } catch (Exception e) {
+                logger.error("Error searching for CSV files: {}", e.getMessage());
                 errorCount.incrementAndGet();
-                return;
             }
             
-            // List and sort CSV files
-            List<String> csvFiles = new ArrayList<>();
-            for (File file : deathlogsDir.listFiles()) {
-                if (file.getName().endsWith(".csv")) {
-                    csvFiles.add(file.getName());
-                }
-            }
+            // Sort CSV files by name (which should include date)
             Collections.sort(csvFiles);
             
             logger.info("Found {} CSV files for historical processing", csvFiles.size());

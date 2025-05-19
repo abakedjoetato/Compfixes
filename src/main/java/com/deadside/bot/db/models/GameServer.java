@@ -95,8 +95,9 @@ public class GameServer {
         this.lastFetch = 0;
         this.logFormat = "csv";
         this.logPath = "";
-        this.logDirectory = "logs";
-        this.deathlogsDirectory = "data/deathlogs";
+        // Using default path for older configurations
+        this.logDirectory = "logs"; 
+        this.deathlogsDirectory = "";  // Will be constructed dynamically with getDeathlogsDirectory()
         this.useSftpForLogs = false;
         this.sftpHost = "";
         this.sftpPort = 22;
@@ -428,9 +429,34 @@ public class GameServer {
     
     /**
      * Get log directory
+     * Constructs path using the host_server/Logs/ pattern if not already defined
      */
     public String getLogDirectory() {
-        return logDirectory != null ? logDirectory : (logPath != null ? logPath : "");
+        // If we have a value that appears to follow the correct pattern, use it
+        if (logDirectory != null && !logDirectory.isEmpty() && 
+            (logDirectory.contains("/Logs") || logDirectory.contains("\\Logs"))) {
+            return logDirectory;
+        }
+        
+        // Check the legacy field next
+        if (logPath != null && !logPath.isEmpty() && 
+            (logPath.contains("/Logs") || logPath.contains("\\Logs"))) {
+            return logPath;
+        }
+        
+        // Otherwise construct the path using the standard: {host}_{server}/Logs/
+        String host = getSftpHost();
+        if (host == null || host.isEmpty()) {
+            host = getHost();
+        }
+        
+        String serverName = getServerId();
+        if (serverName == null || serverName.isEmpty()) {
+            serverName = getName().replaceAll("\\s+", "_");
+        }
+        
+        // Create standardized path
+        return host + "_" + serverName + "/Logs";
     }
     
     /**
@@ -442,9 +468,27 @@ public class GameServer {
     
     /**
      * Get deathlogs directory
+     * Constructs path using the host_server/actual1/deathlogs/ pattern
      */
     public String getDeathlogsDirectory() {
-        return deathlogsDirectory != null ? deathlogsDirectory : "data/deathlogs";
+        if (deathlogsDirectory != null && !deathlogsDirectory.isEmpty() && 
+            (deathlogsDirectory.contains("actual1/deathlogs") || deathlogsDirectory.contains("actual1\\deathlogs"))) {
+            return deathlogsDirectory;
+        }
+        
+        // Construct the path using new standard: {host}_{server}/actual1/deathlogs/
+        String host = getSftpHost();
+        if (host == null || host.isEmpty()) {
+            host = getHost();
+        }
+        
+        String serverName = getServerId();
+        if (serverName == null || serverName.isEmpty()) {
+            serverName = getName().replaceAll("\\s+", "_");
+        }
+        
+        // Create standardized path
+        return host + "_" + serverName + "/actual1/deathlogs";
     }
     
     /**

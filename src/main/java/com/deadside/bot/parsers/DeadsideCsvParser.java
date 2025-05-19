@@ -327,17 +327,26 @@ public class DeadsideCsvParser {
             Set<String> processed = processedFiles.computeIfAbsent(
                     server.getName(), k -> new HashSet<>());
             
-            // Get CSV files from the server - limit to the most recent files for performance
+            // Log the deathlog path we're going to search for better debugging
+            logger.info("Searching for death logs in directory: {} for server: {}", 
+                server.getDeathlogsDirectory(), server.getName());
+            
+            // Get CSV files from the server with improved path handling
             List<String> csvFiles;
             if (processHistorical) {
-                // For historical processing, get all files
+                // For historical processing, get all files with enhanced path resolution
                 csvFiles = sftpConnector.findDeathlogFiles(server);
+                logger.info("Found {} historical CSV death log files for server {}", 
+                    csvFiles.size(), server.getName());
             } else {
                 // For regular processing, only get the newest file or files not yet processed
                 csvFiles = sftpConnector.findRecentDeathlogFiles(server, 1);
+                logger.info("Found {} recent CSV death log files for server {}", 
+                    csvFiles.size(), server.getName());
             }
             
             if (csvFiles.isEmpty()) {
+                logger.info("No CSV death log files found for server: {}", server.getName());
                 return 0;
             }
             

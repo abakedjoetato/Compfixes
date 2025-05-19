@@ -2,6 +2,7 @@ package com.deadside.bot.sftp;
 
 import com.deadside.bot.config.Config;
 import com.deadside.bot.db.models.GameServer;
+import com.deadside.bot.parsers.fixes.ParserPathTracker;
 import com.jcraft.jsch.ChannelSftp;
 import com.jcraft.jsch.JSch;
 import com.jcraft.jsch.JSchException;
@@ -330,17 +331,141 @@ public class SftpConnector {
                 return new ArrayList<>();
             }
             
+            // Check if we have a previously successful path for this server
+            String cachedPath = ParserPathTracker.getInstance().getSuccessfulPath(server, ParserPathTracker.CATEGORY_CSV);
             String baseDir = server.getDeathlogsDirectory();
             List<String> csvFiles = new ArrayList<>();
             
+            // If we have a cached path, try that first
+            if (cachedPath != null) {
+                try {
+                    logger.info("Using cached successful path for CSV file search: {} for server: {}", 
+                        cachedPath, server.getName());
+                    
+                    // Try to list files in the cached directory
+                    if (directoryExists(connection, cachedPath)) {
+                        findCsvFilesRecursively(connection, cachedPath, "", csvFiles);
+                        
+                        if (!csvFiles.isEmpty()) {
+                            logger.info("Found {} CSV files using cached path for server {}", 
+                                csvFiles.size(), server.getName());
+                            return csvFiles;
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.info("Cached path failed for CSV file search, falling back to standard directory");
+                }
+            }
+            
+            logger.info("Searching for deathlog files in standard directory: {} for server: {}", 
+                baseDir, server.getName());
+                
             // Check if base directory exists
             try {
                 if (directoryExists(connection, baseDir)) {
                     // Find all csv files in the directory and subdirectories
                     findCsvFilesRecursively(connection, baseDir, "", csvFiles);
+                    logger.info("Found {} CSV files in deathlog directory for server {}", 
+                        csvFiles.size(), server.getName());
+                    
+                    // Record successful path
+                    if (!csvFiles.isEmpty()) {
+                        ParserPathTracker.getInstance().recordSuccessfulPath(
+                            server, ParserPathTracker.CATEGORY_CSV, baseDir);
+                    }
                 } else {
+                    // Record failed path
+                    ParserPathTracker.getInstance().recordFailedPath(
+                        server, ParserPathTracker.CATEGORY_CSV, baseDir);
+                        
                     logger.info("Could not access deathlogs directory for server {}. Directory doesn't exist: {}", 
                         server.getName(), baseDir);
+                    
+                    // Try standard pattern with host_server format
+                    String host = server.getSftpHost();
+                    if (host == null || host.isEmpty()) {
+                        host = server.getHost();
+                    }
+                    
+                    String serverName = server.getServerId();
+                    if (serverName == null || serverName.isEmpty()) {
+                        serverName = server.getName().replaceAll("\\s+", "_");
+                    }
+                    
+                    // Try host_server/actual1/deathlogs pattern
+                    String standardPath = host + "_" + serverName + "/actual1/deathlogs";
+                    if (!standardPath.equals(baseDir) && directoryExists(connection, standardPath)) {
+                        logger.info("Found standard pattern directory: {}", standardPath);
+                        findCsvFilesRecursively(connection, standardPath, "", csvFiles);
+                        
+                        if (!csvFiles.isEmpty()) {
+                            logger.info("Found {} CSV files in standard pattern directory", csvFiles.size());
+                            ParserPathTracker.getInstance().recordSuccessfulPath(
+                                server, ParserPathTracker.CATEGORY_CSV, standardPath);
+                        }
+                    } else {
+                        // Try alternative patterns
+                        
+                        // Try host_server/deathlogs pattern (without actual1)
+                        String altPath1 = host + "_" + serverName + "/deathlogs";
+                        if (directoryExists(connection, altPath1)) {
+                            logger.info("Found alternative pattern 1 directory: {}", altPath1);
+                            findCsvFilesRecursively(connection, altPath1, "", csvFiles);
+                            
+                            if (!csvFiles.isEmpty()) {
+                                logger.info("Found {} CSV files in alternative pattern 1 directory", csvFiles.size());
+                                ParserPathTracker.getInstance().recordSuccessfulPath(
+                                    server, ParserPathTracker.CATEGORY_CSV, altPath1);
+                            }
+                        }
+                        
+                        // If still no files, try root deathlogs pattern
+                        if (csvFiles.isEmpty()) {
+                            String altPath2 = "deathlogs";
+                            if (directoryExists(connection, altPath2)) {
+                                logger.info("Found alternative pattern 2 directory: {}", altPath2);
+                                findCsvFilesRecursively(connection, altPath2, "", csvFiles);
+                                
+                                if (!csvFiles.isEmpty()) {
+                                    logger.info("Found {} CSV files in alternative pattern 2 directory", csvFiles.size());
+                                    ParserPathTracker.getInstance().recordSuccessfulPath(
+                                        server, ParserPathTracker.CATEGORY_CSV, altPath2);
+                                }
+                            }
+                        }
+                        
+                        // Try other parent directory based discovery as last resort
+                        if (csvFiles.isEmpty()) {
+                            // Try alternative pathing - check parent directory
+                            String parentDir = baseDir.substring(0, baseDir.lastIndexOf('/'));
+                            logger.info("Trying parent directory: {} for server: {}", parentDir, server.getName());
+                            
+                            if (directoryExists(connection, parentDir)) {
+                                // List subdirectories to find potential matches
+                                Vector<ChannelSftp.LsEntry> entries = connection.getChannel().ls(parentDir);
+                                for (ChannelSftp.LsEntry entry : entries) {
+                                    if (entry.getAttrs().isDir() && 
+                                        !entry.getFilename().equals(".") && 
+                                        !entry.getFilename().equals("..")) {
+                                        
+                                        String potentialPath = parentDir + "/" + entry.getFilename() + "/deathlogs";
+                                        logger.info("Checking alternative path: {}", potentialPath);
+                                        
+                                        if (directoryExists(connection, potentialPath)) {
+                                            logger.info("Found alternative deathlog directory: {}", potentialPath);
+                                            findCsvFilesRecursively(connection, potentialPath, "", csvFiles);
+                                            
+                                            if (!csvFiles.isEmpty()) {
+                                                ParserPathTracker.getInstance().recordSuccessfulPath(
+                                                    server, ParserPathTracker.CATEGORY_CSV, potentialPath);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             } catch (Exception e) {
                 // Log as info instead of warning to avoid alarming the user
@@ -362,7 +487,21 @@ public class SftpConnector {
      * This method is used internally by findRecentDeathlogFiles(server, count)
      */
     private List<String> findRecentCsvFilesByDate(GameServer server, int daysToInclude) throws Exception {
+        // Special handling for restricted servers
+        if (server.hasRestrictedIsolation() || "Default Server".equals(server.getName())) {
+            logger.info("Skipping recent CSV file search for {} server",
+                "Default Server".equals(server.getName()) ? "Default Server" : 
+                server.isReadOnly() ? "read-only" : "disabled isolation");
+            return new ArrayList<>();
+        }
+        
         try (SftpConnection connection = connect(server)) {
+            // If connection could not be established
+            if (connection == null) {
+                logger.info("Could not establish connection to server {}, skipping CSV file search", server.getName());
+                return new ArrayList<>();
+            }
+            
             String baseDir = server.getDeathlogsDirectory();
             List<String> recentCsvFiles = new ArrayList<>();
             
@@ -379,19 +518,47 @@ public class SftpConnector {
             SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy.MM.dd");
             String cutoffDateStr = dateFormat.format(cutoffDate);
             
-            logger.info("Finding recent deathlogs for server {} since {}", server.getName(), cutoffDateStr);
+            logger.info("Finding recent deathlogs for server {} since {} in directory: {}", 
+                server.getName(), cutoffDateStr, baseDir);
             
             // Ensure base directory exists
             try {
                 boolean dirExists = directoryExists(connection, baseDir);
-                if (!dirExists) {
-                    logger.info("Log directory {} does not exist for server {}", baseDir, server.getName());
+                if (dirExists) {
+                    // Find recent csv files in the directory and subdirectories
+                    findRecentCsvFilesByDate(connection, baseDir, "", recentCsvFiles, cutoffDateStr);
+                } else {
+                    logger.info("Deathlog directory {} does not exist for server {}", baseDir, server.getName());
+                    
+                    // Try alternative paths - first check host_server directory
+                    String host = server.getSftpHost();
+                    if (host == null || host.isEmpty()) {
+                        host = server.getHost();
+                    }
+                    
+                    String serverName = server.getServerId();
+                    if (serverName == null || serverName.isEmpty()) {
+                        serverName = server.getName().replaceAll("\\s+", "_");
+                    }
+                    
+                    String parentDir = host + "_" + serverName;
+                    
+                    if (directoryExists(connection, parentDir)) {
+                        logger.info("Found parent directory: {} - checking for deathlogs structure", parentDir);
+                        
+                        // Check for actual1/deathlogs structure
+                        String actualPath = parentDir + "/actual1";
+                        if (directoryExists(connection, actualPath)) {
+                            String deathlogsPath = actualPath + "/deathlogs";
+                            if (directoryExists(connection, deathlogsPath)) {
+                                logger.info("Found alternative deathlogs directory: {}", deathlogsPath);
+                                findRecentCsvFilesByDate(connection, deathlogsPath, "", recentCsvFiles, cutoffDateStr);
+                            }
+                        }
+                    }
                 }
-                
-                // Find recent csv files in the directory and subdirectories (implementation below)
-                findRecentCsvFilesByDate(connection, baseDir, "", recentCsvFiles, cutoffDateStr);
             } catch (Exception e) {
-                logger.warn("Could not search for recent deathlog files: {}", e.getMessage());
+                logger.info("Could not search for recent deathlog files: {}", e.getMessage());
             }
             
             logger.info("Found {} recent CSV files for server {}", recentCsvFiles.size(), server.getName());
@@ -405,24 +572,39 @@ public class SftpConnector {
     private void findCsvFilesRecursively(SftpConnection connection, String baseDir, String currentPath, List<String> csvFiles) throws Exception {
         String currentDir = currentPath.isEmpty() ? baseDir : baseDir + "/" + currentPath;
         
-        Vector<ChannelSftp.LsEntry> entries = connection.getChannel().ls(currentDir);
-        for (ChannelSftp.LsEntry entry : entries) {
-            String filename = entry.getFilename();
-            
-            // Skip parent directory entries
-            if (filename.equals(".") || filename.equals("..")) {
-                continue;
+        logger.debug("Searching for CSV files in directory: {}", currentDir);
+        
+        try {
+            Vector<ChannelSftp.LsEntry> entries = connection.getChannel().ls(currentDir);
+            for (ChannelSftp.LsEntry entry : entries) {
+                String filename = entry.getFilename();
+                
+                // Skip parent directory entries
+                if (filename.equals(".") || filename.equals("..")) {
+                    continue;
+                }
+                
+                String relativePath = currentPath.isEmpty() ? filename : currentPath + "/" + filename;
+                
+                if (entry.getAttrs().isDir()) {
+                    // Check if directory is special case for deathlogs
+                    if (filename.equals("actual1") || filename.equals("deathlogs")) {
+                        logger.info("Found potential deathlogs directory structure at: {}/{}", currentDir, filename);
+                    }
+                    
+                    // Recursively search subdirectory with depth limiting (max 3 levels deep)
+                    if (currentPath.split("/").length < 3) {
+                        findCsvFilesRecursively(connection, baseDir, relativePath, csvFiles);
+                    }
+                } else if (filename.toLowerCase().endsWith(".csv")) {
+                    // Add CSV file to the list
+                    csvFiles.add(relativePath);
+                    logger.debug("Found CSV file: {}", relativePath);
+                }
             }
-            
-            String relativePath = currentPath.isEmpty() ? filename : currentPath + "/" + filename;
-            
-            if (entry.getAttrs().isDir()) {
-                // Recursively search subdirectory
-                findCsvFilesRecursively(connection, baseDir, relativePath, csvFiles);
-            } else if (filename.toLowerCase().endsWith(".csv")) {
-                // Add CSV file to the list
-                csvFiles.add(relativePath);
-            }
+        } catch (Exception e) {
+            // Log but continue - don't let one bad directory stop the whole search
+            logger.info("Error listing directory {}: {}", currentDir, e.getMessage());
         }
     }
     
@@ -597,8 +779,95 @@ public class SftpConnector {
      * @return The file content as a string
      */
     public String readDeathlogFile(GameServer server, String filename) throws Exception {
-        String filePath = server.getDeathlogsDirectory() + "/" + filename;
-        return readFile(server, filePath);
+        // Check if we have a previously successful path for this server
+        String cachedPath = ParserPathTracker.getInstance().getSuccessfulPath(server, ParserPathTracker.CATEGORY_CSV);
+        if (cachedPath != null) {
+            try {
+                // Try the previously successful path first
+                logger.debug("Using cached successful CSV path for server {}: {}", server.getName(), cachedPath);
+                String fullPath = cachedPath.endsWith("/") ? cachedPath + filename : cachedPath + "/" + filename;
+                String content = readFile(server, fullPath);
+                return content;
+            } catch (Exception e) {
+                // If the cached path fails, fall back to standard resolution
+                logger.info("Cached CSV path failed for server {}, falling back to standard resolution", server.getName());
+            }
+        }
+        
+        String baseDir = server.getDeathlogsDirectory();
+        String filePath = baseDir + "/" + filename;
+        
+        try {
+            String content = readFile(server, filePath);
+            // Record successful path
+            ParserPathTracker.getInstance().recordSuccessfulPath(server, ParserPathTracker.CATEGORY_CSV, baseDir);
+            return content;
+        } catch (Exception e) {
+            // Record failed path
+            ParserPathTracker.getInstance().recordFailedPath(server, ParserPathTracker.CATEGORY_CSV, baseDir);
+            
+            // If the file doesn't exist at the standard path, try alternative paths
+            logger.info("Could not find deathlog file at primary path: {}, attempting alternatives", filePath);
+            
+            // Try alternative paths based on standard format: {host}_{server}/actual1/deathlogs/
+            String host = server.getSftpHost();
+            if (host == null || host.isEmpty()) {
+                host = server.getHost();
+            }
+            
+            String serverName = server.getServerId();
+            if (serverName == null || serverName.isEmpty()) {
+                serverName = server.getName().replaceAll("\\s+", "_");
+            }
+            
+            // First alternative - standard format
+            String altPath1 = host + "_" + serverName + "/actual1/deathlogs/" + filename;
+            try {
+                logger.info("Trying alternative path 1: {}", altPath1);
+                String content = readFile(server, altPath1);
+                // Record successful path
+                ParserPathTracker.getInstance().recordSuccessfulPath(
+                    server, ParserPathTracker.CATEGORY_CSV, host + "_" + serverName + "/actual1/deathlogs");
+                return content;
+            } catch (Exception ex) {
+                // Record failed path
+                ParserPathTracker.getInstance().recordFailedPath(
+                    server, ParserPathTracker.CATEGORY_CSV, host + "_" + serverName + "/actual1/deathlogs");
+                
+                // Second alternative - without actual1
+                String altPath2 = host + "_" + serverName + "/deathlogs/" + filename;
+                try {
+                    logger.info("Trying alternative path 2: {}", altPath2);
+                    String content = readFile(server, altPath2);
+                    // Record successful path
+                    ParserPathTracker.getInstance().recordSuccessfulPath(
+                        server, ParserPathTracker.CATEGORY_CSV, host + "_" + serverName + "/deathlogs");
+                    return content;
+                } catch (Exception ex2) {
+                    // Record failed path
+                    ParserPathTracker.getInstance().recordFailedPath(
+                        server, ParserPathTracker.CATEGORY_CSV, host + "_" + serverName + "/deathlogs");
+                    
+                    // Third alternative - simple deathlogs directory at root
+                    String altPath3 = "deathlogs/" + filename;
+                    try {
+                        logger.info("Trying alternative path 3: {}", altPath3);
+                        String content = readFile(server, altPath3);
+                        // Record successful path
+                        ParserPathTracker.getInstance().recordSuccessfulPath(
+                            server, ParserPathTracker.CATEGORY_CSV, "deathlogs");
+                        return content;
+                    } catch (Exception ex3) {
+                        // Record failed path
+                        ParserPathTracker.getInstance().recordFailedPath(
+                            server, ParserPathTracker.CATEGORY_CSV, "deathlogs");
+                        
+                        // If all alternatives fail, throw the original exception
+                        throw e;
+                    }
+                }
+            }
+        }
     }
     
     /**
@@ -630,8 +899,95 @@ public class SftpConnector {
      * @return The new lines
      */
     public List<String> readLogLinesAfter(GameServer server, String filename, long afterLine) throws Exception {
-        String filePath = server.getLogDirectory() + "/" + filename;
-        return readLinesAfter(server, filePath, afterLine);
+        // Check if we have a previously successful path for this server
+        String cachedPath = ParserPathTracker.getInstance().getSuccessfulPath(server, ParserPathTracker.CATEGORY_LOG);
+        if (cachedPath != null) {
+            try {
+                // Try the previously successful path first
+                logger.debug("Using cached successful LOG path for server {}: {}", server.getName(), cachedPath);
+                String fullPath = cachedPath.endsWith("/") ? cachedPath + filename : cachedPath + "/" + filename;
+                List<String> lines = readLinesAfter(server, fullPath, afterLine);
+                return lines;
+            } catch (Exception e) {
+                // If the cached path fails, fall back to standard resolution
+                logger.info("Cached LOG path failed for server {}, falling back to standard resolution", server.getName());
+            }
+        }
+        
+        String baseDir = server.getLogDirectory();
+        String filePath = baseDir + "/" + filename;
+        
+        try {
+            List<String> lines = readLinesAfter(server, filePath, afterLine);
+            // Record successful path
+            ParserPathTracker.getInstance().recordSuccessfulPath(server, ParserPathTracker.CATEGORY_LOG, baseDir);
+            return lines;
+        } catch (Exception e) {
+            // Record failed path
+            ParserPathTracker.getInstance().recordFailedPath(server, ParserPathTracker.CATEGORY_LOG, baseDir);
+            
+            // If the file doesn't exist at the standard path, try alternative paths
+            logger.info("Could not find log file at primary path: {}, attempting alternatives", filePath);
+            
+            // Try alternative paths based on standard format: {host}_{server}/Logs/
+            String host = server.getSftpHost();
+            if (host == null || host.isEmpty()) {
+                host = server.getHost();
+            }
+            
+            String serverName = server.getServerId();
+            if (serverName == null || serverName.isEmpty()) {
+                serverName = server.getName().replaceAll("\\s+", "_");
+            }
+            
+            // First alternative - standard format
+            String altPath1 = host + "_" + serverName + "/Logs/" + filename;
+            try {
+                logger.info("Trying alternative log path 1: {}", altPath1);
+                List<String> lines = readLinesAfter(server, altPath1, afterLine);
+                // Record successful path
+                ParserPathTracker.getInstance().recordSuccessfulPath(
+                    server, ParserPathTracker.CATEGORY_LOG, host + "_" + serverName + "/Logs");
+                return lines;
+            } catch (Exception ex) {
+                // Record failed path
+                ParserPathTracker.getInstance().recordFailedPath(
+                    server, ParserPathTracker.CATEGORY_LOG, host + "_" + serverName + "/Logs");
+                
+                // Second alternative - no subdirectory
+                String altPath2 = host + "_" + serverName + "/" + filename;
+                try {
+                    logger.info("Trying alternative log path 2: {}", altPath2);
+                    List<String> lines = readLinesAfter(server, altPath2, afterLine);
+                    // Record successful path
+                    ParserPathTracker.getInstance().recordSuccessfulPath(
+                        server, ParserPathTracker.CATEGORY_LOG, host + "_" + serverName);
+                    return lines;
+                } catch (Exception ex2) {
+                    // Record failed path
+                    ParserPathTracker.getInstance().recordFailedPath(
+                        server, ParserPathTracker.CATEGORY_LOG, host + "_" + serverName);
+                    
+                    // Third alternative - simple logs directory at root
+                    String altPath3 = "Logs/" + filename;
+                    try {
+                        logger.info("Trying alternative log path 3: {}", altPath3);
+                        List<String> lines = readLinesAfter(server, altPath3, afterLine);
+                        // Record successful path
+                        ParserPathTracker.getInstance().recordSuccessfulPath(
+                            server, ParserPathTracker.CATEGORY_LOG, "Logs");
+                        return lines;
+                    } catch (Exception ex3) {
+                        // Record failed path
+                        ParserPathTracker.getInstance().recordFailedPath(
+                            server, ParserPathTracker.CATEGORY_LOG, "Logs");
+                        
+                        // If all alternatives fail, throw the original exception
+                        throw e;
+                    }
+                }
+            }
+        }
     }
     
     /**
@@ -669,7 +1025,17 @@ public class SftpConnector {
      * @return The new lines
      */
     public List<String> readDeathlogLinesAfter(GameServer server, String filename, long afterLine) throws Exception {
-        String filePath = server.getDeathlogsDirectory() + "/" + filename;
+        // Check if filename is the full path
+        String filePath;
+        if (filename.startsWith("/") || filename.contains(":")) {
+            // Filename is already a full path
+            filePath = filename;
+        } else {
+            // Construct the path by appending filename to the deathlogs directory
+            filePath = server.getDeathlogsDirectory() + "/" + filename;
+        }
+        
+        logger.debug("Reading death log file at path: {}", filePath);
         return readLinesAfter(server, filePath, afterLine);
     }
     
@@ -878,23 +1244,88 @@ public class SftpConnector {
                 return null;
             }
             
+            // Log path information for debugging
+            logger.info("Attempting to read file: {} from server: {}", remotePath, server.getName());
+            
             session = createSession(server);
             if (session == null) {
+                logger.warn("Could not create SFTP session for server {}", server.getName());
                 return null;
             }
             
             channelSftp = (ChannelSftp) session.openChannel("sftp");
             channelSftp.connect(timeout);
             
-            try (InputStream inputStream = channelSftp.get(remotePath);
-                 ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+            try {
+                InputStream inputStream = null;
                 
+                try {
+                    // First try the original path
+                    inputStream = channelSftp.get(remotePath);
+                } catch (Exception e) {
+                    // If the file doesn't exist, try alternative paths based on the path type
+                    if (isDeathlogPath(remotePath)) {
+                        // For CSV deathlogs, try alternative paths
+                        String basename = getBasenameFromPath(remotePath);
+                        
+                        // Try host_server/actual1/deathlogs format
+                        String host = server.getSftpHost();
+                        if (host == null || host.isEmpty()) {
+                            host = server.getHost();
+                        }
+                        
+                        String serverName = server.getServerId();
+                        if (serverName == null || serverName.isEmpty()) {
+                            serverName = server.getName().replaceAll("\\s+", "_");
+                        }
+                        
+                        String alternativePath = host + "_" + serverName + "/actual1/deathlogs/" + basename;
+                        logger.info("Original path failed, trying alternative deathlog path: {}", alternativePath);
+                        
+                        try {
+                            inputStream = channelSftp.get(alternativePath);
+                        } catch (Exception ex) {
+                            // Try without the "actual1" part
+                            alternativePath = host + "_" + serverName + "/deathlogs/" + basename;
+                            logger.info("Second path failed, trying simpler alternative: {}", alternativePath);
+                            inputStream = channelSftp.get(alternativePath);
+                        }
+                    } else if (isLogPath(remotePath)) {
+                        // For Deadside.log, try alternative paths
+                        String host = server.getSftpHost();
+                        if (host == null || host.isEmpty()) {
+                            host = server.getHost();
+                        }
+                        
+                        String serverName = server.getServerId();
+                        if (serverName == null || serverName.isEmpty()) {
+                            serverName = server.getName().replaceAll("\\s+", "_");
+                        }
+                        
+                        String alternativePath = host + "_" + serverName + "/Logs/Deadside.log";
+                        logger.info("Original path failed, trying alternative log path: {}", alternativePath);
+                        inputStream = channelSftp.get(alternativePath);
+                    } else {
+                        // Re-throw if this isn't a special file type
+                        throw e;
+                    }
+                }
+                
+                // Process the file content
+                ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
                 IOUtils.copy(inputStream, outputStream);
+                inputStream.close();
+                
+                logger.info("Successfully read file content from path: {}", remotePath);
                 return outputStream.toString(StandardCharsets.UTF_8.name());
+            } catch (Exception e) {
+                logger.error("All attempts to read file content failed for server {}: {}", 
+                    server.getName(), e.getMessage());
+                return null;
             }
         } catch (Exception e) {
-            logger.error("Error getting content of file: {} from server {}", 
-                remotePath, server.getName(), e);
+            logger.error("Error getting content of file: {} from server {}: {}", 
+                remotePath, server.getName(), e.getMessage());
             return null;
         } finally {
             if (channelSftp != null && channelSftp.isConnected()) {
@@ -986,5 +1417,48 @@ public class SftpConnector {
                 session.disconnect();
             }
         }
+    }
+    
+    /**
+     * Check if a path is a deathlog file path
+     */
+    private boolean isDeathlogPath(String path) {
+        if (path == null || path.isEmpty()) {
+            return false;
+        }
+        
+        // Check for CSV extension and deathlog patterns
+        return path.toLowerCase().endsWith(".csv") && 
+              (path.contains("deathlogs") || path.contains("death") || 
+               path.matches(".*\\d{4}\\.\\d{2}\\.\\d{2}.*\\.csv"));
+    }
+    
+    /**
+     * Check if a path is a Deadside log file path
+     */
+    private boolean isLogPath(String path) {
+        if (path == null || path.isEmpty()) {
+            return false;
+        }
+        
+        // Check for log patterns
+        return (path.toLowerCase().endsWith("deadside.log") || path.toLowerCase().contains("/logs/")) &&
+               !path.toLowerCase().contains("deathlogs");
+    }
+    
+    /**
+     * Extract the basename from a path (filename without directory)
+     */
+    private String getBasenameFromPath(String path) {
+        if (path == null || path.isEmpty()) {
+            return "";
+        }
+        
+        int lastSlash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+        if (lastSlash == -1) {
+            return path; // No directory separator found, return the whole string
+        }
+        
+        return path.substring(lastSlash + 1);
     }
 }

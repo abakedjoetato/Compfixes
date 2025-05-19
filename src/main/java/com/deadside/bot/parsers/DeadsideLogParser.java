@@ -496,8 +496,26 @@ public class DeadsideLogParser {
      * Get the path to the server log file
      */
     private String getServerLogPath(GameServer server) {
-        // Use the server's log directory and append the Deadside log file
-        return server.getLogDirectory() + "/Deadside.log";
+        // Check if the existing path already follows the correct pattern
+        String currentLogDir = server.getLogDirectory();
+        if (currentLogDir != null && !currentLogDir.isEmpty() && 
+            (currentLogDir.contains("/Logs") || currentLogDir.contains("\\Logs"))) {
+            return currentLogDir + "/Deadside.log";
+        }
+        
+        // Construct the path using new standard: {host}_{server}/Logs/Deadside.log
+        String host = server.getSftpHost();
+        if (host == null || host.isEmpty()) {
+            host = server.getHost();
+        }
+        
+        String serverName = server.getServerId();
+        if (serverName == null || serverName.isEmpty()) {
+            serverName = server.getName().replaceAll("\\s+", "_");
+        }
+        
+        // Create standardized path
+        return host + "_" + serverName + "/Logs/Deadside.log";
     }
     
     /**
