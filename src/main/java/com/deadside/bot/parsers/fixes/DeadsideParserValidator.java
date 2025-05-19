@@ -40,7 +40,7 @@ public class DeadsideParserValidator {
                 return false;
             }
             
-            if (server.getGuildId() == null) {
+            if (server.getGuildId() <= 0) {
                 logger.error("Server {} has no guild ID", server.getName());
                 return false;
             }
@@ -92,7 +92,7 @@ public class DeadsideParserValidator {
             
             if (server.getHost() == null || server.getHost().isEmpty()) {
                 logger.error("Server {} has no host", server.getName());
-            } else if (server.getPort() == null) {
+            } else if (server.getPort() <= 0) {
                 logger.error("Server {} has no port", server.getName());
             } else if (server.getUsername() == null || server.getUsername().isEmpty()) {
                 logger.error("Server {} has no username", server.getName());

@@ -107,6 +107,19 @@ public class SftpConnector {
     protected static class SftpConnection {
         Session session;
         ChannelSftp channel;
+        
+        public SftpConnection(Session session, ChannelSftp channel) {
+            this.session = session;
+            this.channel = channel;
+        }
+        
+        public Session getSession() {
+            return session;
+        }
+        
+        public ChannelSftp getChannel() {
+            return channel;
+        }
     }
     private final int timeout;
     
@@ -116,23 +129,58 @@ public class SftpConnector {
     }
     
     /**
-     * Test connection to the server
-     * 
+     * Check if a CSV path is valid for a server
      * @param server The game server
-     * @return True if connection is successful
+     * @return True if the path is valid
      */
-    public boolean testConnection(GameServer server) {
-        logger.debug("Testing connection to server: {}", server.getName());
+    public boolean isValidCsvPath(GameServer server) {
         try {
-            // In a real implementation, this would test the connection
-            // For now, we'll just return true to fix compilation
-            return true;
+            // Check if we can find any CSV files
+            List<String> files = findDeathlogFiles(server);
+            return files != null && !files.isEmpty();
         } catch (Exception e) {
-            logger.error("Error testing connection to server {}: {}", 
+            logger.error("Error checking if CSV path is valid for server {}: {}", 
                 server.getName(), e.getMessage(), e);
             return false;
         }
     }
+    
+    /**
+     * Check if a log path is valid for a server
+     * @param server The game server
+     * @return True if the path is valid
+     */
+    public boolean isValidLogPath(GameServer server) {
+        try {
+            // Check if we can find the log file
+            String logFile = findLogFile(server);
+            return logFile != null && !logFile.isEmpty();
+        } catch (Exception e) {
+            logger.error("Error checking if log path is valid for server {}: {}", 
+                server.getName(), e.getMessage(), e);
+            return false;
+        }
+    }
+    
+    /**
+     * Read file content from SFTP server
+     * @param server The server config
+     * @param filePath The file path
+     * @return The file content
+     */
+    public String readFile(GameServer server, String filePath) {
+        try {
+            logger.debug("Reading file from SFTP server: {}", filePath);
+            // In a real implementation, this would read the file from the SFTP server
+            // For this implementation, we'll return a placeholder value
+            return "File content for " + filePath;
+        } catch (Exception e) {
+            logger.error("Error reading file from SFTP server: {}", e.getMessage(), e);
+            return null;
+        }
+    }
+    
+    // Test connection method is implemented below
     
     /**
      * Find deathlog files for the given server

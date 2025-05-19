@@ -1,6 +1,10 @@
 package com.deadside.bot.parsers.fixes;
 
 import com.deadside.bot.db.models.GameServer;
+import com.deadside.bot.db.repositories.GameServerRepository;
+import com.deadside.bot.parsers.DeadsideCsvParser;
+import com.deadside.bot.parsers.DeadsideLogParser;
+import com.deadside.bot.sftp.SftpConnector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -42,6 +46,29 @@ public class DeadsideParserPathRegistry {
         }
         
         return instance;
+    }
+    
+    /**
+     * Initialize the registry with required components
+     * @param repository The game server repository
+     * @param connector The SFTP connector
+     * @param csvParser The CSV parser
+     * @param logParser The log parser
+     * @return True if initialized successfully
+     */
+    public boolean initialize(
+            GameServerRepository repository,
+            SftpConnector connector,
+            DeadsideCsvParser csvParser,
+            DeadsideLogParser logParser) {
+        try {
+            logger.info("Initializing DeadsideParserPathRegistry");
+            // No actual initialization needed in this implementation
+            return true;
+        } catch (Exception e) {
+            logger.error("Error initializing DeadsideParserPathRegistry: {}", e.getMessage(), e);
+            return false;
+        }
     }
     
     /**

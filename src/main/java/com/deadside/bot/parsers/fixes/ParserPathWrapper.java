@@ -34,7 +34,7 @@ public class ParserPathWrapper {
         this.csvParser = csvParser;
         this.logParser = logParser;
         this.pathFix = new DirectPathResolutionFix(connector);
-        this.pathRegistry = new DeadsideParserPathRegistry();
+        this.pathRegistry = DeadsideParserPathRegistry.getInstance();
         
         // Initialize path resolution
         this.pathFix.initialize();

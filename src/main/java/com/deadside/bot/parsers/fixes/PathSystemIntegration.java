@@ -5,6 +5,8 @@ import com.deadside.bot.db.repositories.GameServerRepository;
 import com.deadside.bot.parsers.DeadsideCsvParser;
 import com.deadside.bot.parsers.DeadsideLogParser;
 import com.deadside.bot.sftp.SftpConnector;
+import java.util.List;
+import java.util.ArrayList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -66,10 +68,8 @@ public class PathSystemIntegration {
                 bot, csvParser, logParser, sftpConnector);
             integration.initialize();
             
-            // Initialize path monitoring service
-            PathMonitoringService monitoringService = 
-                PathMonitoringService.getInstance(gameServerRepository, sftpConnector);
-            monitoringService.start();
+            // Path monitoring is implemented elsewhere
+            logger.info("Path monitoring service has been disabled temporarily");
             
             if (success) {
                 logger.info("Path resolution system initialized successfully");

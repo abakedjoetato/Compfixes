@@ -445,6 +445,23 @@ public class GameServerRepository {
     }
     
     /**
+     * Find all game servers for a Discord guild
+     * @param guildId The guild ID
+     * @return List of all servers for the given guild
+     */
+    public List<GameServer> findAllByGuildId(long guildId) {
+        try {
+            List<GameServer> servers = new ArrayList<>();
+            Bson filter = Filters.eq("guildId", guildId);
+            getCollection().find(filter).into(servers);
+            return servers;
+        } catch (Exception e) {
+            logger.error("Error finding all game servers for guild: {}", guildId, e);
+            return new ArrayList<>();
+        }
+    }
+    
+    /**
      * Delete a game server by ID with proper guild isolation
      * Prevents accidental deletion of servers from another guild
      */

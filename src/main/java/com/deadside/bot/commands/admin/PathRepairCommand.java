@@ -140,9 +140,9 @@ public class PathRepairCommand extends ListenerAdapter {
             int failed = 0;
             
             // Process each server
-            for (GameServer server : servers) {
+            for (GameServer gameServer : servers) {
                 try {
-                    Map<String, Object> results = pathFixIntegration.fixServerPaths(server, sftpConnector, serverRepository);
+                    Map<String, Object> results = pathFixIntegration.fixServerPaths(gameServer, sftpConnector, serverRepository);
                     boolean success = !(results.containsKey("error"));
                     
                     if (success) {

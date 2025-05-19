@@ -86,7 +86,11 @@ public class PathIsolationFix {
             logger.info("Fixing paths for guild: {}", guildId);
             
             // Find servers for guild
-            List<GameServer> servers = repository.findByGuildId(guildId);
+            List<GameServer> servers = new ArrayList<>();
+            GameServer server = repository.findByGuildId(guildId);
+            if (server != null) {
+                servers.add(server);
+            };
             
             if (servers == null || servers.isEmpty()) {
                 logger.warn("No servers found for guild: {}", guildId);
@@ -102,9 +106,9 @@ public class PathIsolationFix {
             // Fix each server
             List<Map<String, Object>> serverResults = new ArrayList<>();
             
-            for (GameServer server : servers) {
+            for (GameServer gameServer : servers) {
                 try {
-                    Map<String, Object> serverResult = fixPaths(server);
+                    Map<String, Object> serverResult = fixPaths(gameServer);
                     serverResults.add(serverResult);
                     
                     boolean pathsFixed = serverResult.containsKey("pathsFixed") 

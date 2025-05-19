@@ -4,7 +4,9 @@ import com.deadside.bot.db.models.GameServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -17,6 +19,96 @@ public class ParserIntegrationHooks {
     
     // Path caches
     private static final Map<String, Map<String, String>> serverPathCache = new ConcurrentHashMap<>();
+    
+    /**
+     * Get the registered CSV path for a server
+     * @param server The game server
+     * @return The registered CSV path, or null if not found
+     */
+    public static String getRegisteredCsvPath(GameServer server) {
+        return getCachedCsvPath(server);
+    }
+    
+    /**
+     * Get the registered log path for a server
+     * @param server The game server
+     * @return The registered log path, or null if not found
+     */
+    public static String getRegisteredLogPath(GameServer server) {
+        return getCachedLogPath(server);
+    }
+    
+    /**
+     * Get recommended CSV paths for a server
+     * @param server The game server
+     * @return List of recommended CSV paths
+     */
+    public static List<String> getRecommendedCsvPaths(GameServer server) {
+        List<String> paths = new ArrayList<>();
+        
+        try {
+            // Get server properties
+            String host = server.getSftpHost();
+            if (host == null || host.isEmpty()) {
+                host = server.getHost();
+            }
+            
+            String serverName = server.getServerId();
+            if (serverName == null || serverName.isEmpty()) {
+                serverName = server.getName().replaceAll("\\s+", "_");
+            }
+            
+            // Add recommended paths
+            paths.add(host + "_" + serverName + "/actual1/deathlogs");
+            paths.add(host + "_" + serverName + "/actual/deathlogs");
+            paths.add(host + "/" + serverName + "/actual1/deathlogs");
+            paths.add(host + "/" + serverName + "/actual/deathlogs");
+            paths.add(serverName + "/actual1/deathlogs");
+            paths.add(serverName + "/actual/deathlogs");
+            
+        } catch (Exception e) {
+            logger.error("Error getting recommended CSV paths for server {}: {}", 
+                server.getName(), e.getMessage(), e);
+        }
+        
+        return paths;
+    }
+    
+    /**
+     * Get recommended log paths for a server
+     * @param server The game server
+     * @return List of recommended log paths
+     */
+    public static List<String> getRecommendedLogPaths(GameServer server) {
+        List<String> paths = new ArrayList<>();
+        
+        try {
+            // Get server properties
+            String host = server.getSftpHost();
+            if (host == null || host.isEmpty()) {
+                host = server.getHost();
+            }
+            
+            String serverName = server.getServerId();
+            if (serverName == null || serverName.isEmpty()) {
+                serverName = server.getName().replaceAll("\\s+", "_");
+            }
+            
+            // Add recommended paths
+            paths.add(host + "_" + serverName + "/Logs");
+            paths.add(host + "_" + serverName + "/Deadside/Logs");
+            paths.add(host + "/" + serverName + "/Logs");
+            paths.add(host + "/" + serverName + "/Deadside/Logs");
+            paths.add(serverName + "/Logs");
+            paths.add(serverName + "/Deadside/Logs");
+            
+        } catch (Exception e) {
+            logger.error("Error getting recommended log paths for server {}: {}", 
+                server.getName(), e.getMessage(), e);
+        }
+        
+        return paths;
+    }
     
     /**
      * Record a successful CSV path for a server

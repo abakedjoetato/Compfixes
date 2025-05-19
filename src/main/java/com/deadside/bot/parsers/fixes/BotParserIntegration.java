@@ -40,6 +40,18 @@ public class BotParserIntegration {
     }
     
     /**
+     * Initialize the integration
+     */
+    public void initialize() {
+        try {
+            logger.info("Initializing BotParserIntegration");
+            // Initialization logic can be added here
+        } catch (Exception e) {
+            logger.error("Error initializing BotParserIntegration: {}", e.getMessage(), e);
+        }
+    }
+    
+    /**
      * Process CSV files for a server with path resolution fixes
      * @param server The game server
      * @return The number of files processed

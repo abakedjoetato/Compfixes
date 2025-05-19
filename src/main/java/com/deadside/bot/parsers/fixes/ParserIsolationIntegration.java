@@ -44,7 +44,11 @@ public class ParserIsolationIntegration {
             logger.info("Fixing paths for guild: {}", guildId);
             
             // Find servers for guild
-            List<GameServer> servers = repository.findByGuildId(guildId);
+            List<GameServer> servers = new ArrayList<>();
+            GameServer server = repository.findByGuildId(guildId);
+            if (server != null) {
+                servers.add(server);
+            };
             
             if (servers == null || servers.isEmpty()) {
                 logger.warn("No servers found for guild: {}", guildId);
@@ -61,10 +65,10 @@ public class ParserIsolationIntegration {
             Map<String, Map<String, Object>> serverResults = new HashMap<>();
             
             // Fix paths for each server
-            for (GameServer server : servers) {
+            for (GameServer gameServer : servers) {
                 try {
-                    Map<String, Object> serverResult = pathFix.fixPaths(server);
-                    serverResults.put(server.getId().toString(), serverResult);
+                    Map<String, Object> serverResult = pathFix.fixPaths(gameServer);
+                    serverResults.put(gameServer.getId().toString(), serverResult);
                     
                     boolean csvPathFixed = serverResult.containsKey("csvPathFixed") 
                         && (boolean) serverResult.get("csvPathFixed");
@@ -152,7 +156,11 @@ public class ParserIsolationIntegration {
             logger.info("Checking path health for guild: {}", guildId);
             
             // Find servers for guild
-            List<GameServer> servers = repository.findByGuildId(guildId);
+            List<GameServer> servers = new ArrayList<>();
+            GameServer server = repository.findByGuildId(guildId);
+            if (server != null) {
+                servers.add(server);
+            }
             
             if (servers == null || servers.isEmpty()) {
                 logger.warn("No servers found for guild: {}", guildId);
@@ -169,12 +177,12 @@ public class ParserIsolationIntegration {
             Map<String, Object> serverResults = new HashMap<>();
             
             // Check health for each server
-            for (GameServer server : servers) {
+            for (GameServer gameServer : servers) {
                 try {
                     ParserPathRepairHook repairHook = new ParserPathRepairHook(connector, repository);
                     
-                    boolean csvPathOk = repairHook.isValidCsvPath(server);
-                    boolean logPathOk = repairHook.isValidLogPath(server);
+                    boolean csvPathOk = repairHook.isValidCsvPath(gameServer);
+                    boolean logPathOk = repairHook.isValidLogPath(gameServer);
                     
                     Map<String, Object> serverResult = new HashMap<>();
                     serverResult.put("csvPathOk", csvPathOk);
