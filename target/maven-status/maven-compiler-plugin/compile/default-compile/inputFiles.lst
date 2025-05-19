@@ -134,8 +134,8 @@
 /home/runner/workspace/src/main/java/com/deadside/bot/parsers/ParserPathHooks.java
 /home/runner/workspace/src/main/java/com/deadside/bot/parsers/fixes/FixBatch.java
 /home/runner/workspace/src/main/java/com/deadside/bot/SimpleLogTester.java
-/home/runner/workspace/src/main/java/com/deadside/bot/parsers/fixes/DeadsidePathFix.java
 /home/runner/workspace/src/main/java/com/deadside/bot/parsers/fixes/PathSystemIntegration.java
+/home/runner/workspace/src/main/java/com/deadside/bot/parsers/fixes/DeadsidePathFix.java
 /home/runner/workspace/src/main/java/com/deadside/bot/utils/CommandContext.java
 /home/runner/workspace/src/main/java/com/deadside/bot/commands/economy/BalanceCommand.java
 /home/runner/workspace/src/main/java/com/deadside/bot/validation/ParserSystemIntegrator.java
@@ -149,8 +149,8 @@
 /home/runner/workspace/src/main/java/com/deadside/bot/isolation/IsolationValidationTest.java
 /home/runner/workspace/src/main/java/com/deadside/bot/isolation/IsolationCommandContext.java
 /home/runner/workspace/src/main/java/com/deadside/bot/utils/OwnerCheck.java
-/home/runner/workspace/src/main/java/com/deadside/bot/parsers/fixes/DeadsideParserValidator.java
 /home/runner/workspace/src/main/java/com/deadside/bot/parsers/fixes/ParserIsolationIntegration.java
+/home/runner/workspace/src/main/java/com/deadside/bot/parsers/fixes/DeadsideParserValidator.java
 /home/runner/workspace/src/main/java/com/deadside/bot/validation/ParserSystemValidator.java
 /home/runner/workspace/src/main/java/com/deadside/bot/commands/economy/WorkCommand.java
 /home/runner/workspace/src/main/java/com/deadside/bot/commands/admin/DatabaseResetCommand.java

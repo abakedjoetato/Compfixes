@@ -1,7 +1,10 @@
 package com.deadside.bot.parsers.fixes;
 
 import com.deadside.bot.db.models.GameServer;
+import com.deadside.bot.db.repositories.GameServerRepository;
+import com.deadside.bot.db.repositories.PlayerRepository;
 import com.deadside.bot.sftp.SftpConnector;
+import net.dv8tion.jda.api.JDA;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,16 +16,50 @@ import java.util.Map;
  * This class validates server configurations for proper operation
  */
 public class DeadsideParserValidator {
+    
+    /**
+     * Validation results class
+     */
+    public static class ValidationResults {
+        private final boolean valid;
+        private final Map<String, Object> results;
+        
+        public ValidationResults(boolean valid, Map<String, Object> results) {
+            this.valid = valid;
+            this.results = results;
+        }
+        
+        public boolean isValid() {
+            return valid;
+        }
+        
+        public Map<String, Object> getResults() {
+            return results;
+        }
+    }
     private static final Logger logger = LoggerFactory.getLogger(DeadsideParserValidator.class);
     
     private final SftpConnector connector;
     
     /**
-     * Constructor
+     * Constructor with just the connector
      * @param connector The SFTP connector
      */
     public DeadsideParserValidator(SftpConnector connector) {
         this.connector = connector;
+    }
+    
+    /**
+     * Constructor with additional parameters
+     * @param jda The JDA instance
+     * @param serverRepository The server repository
+     * @param playerRepository The player repository
+     * @param connector The SFTP connector
+     */
+    public DeadsideParserValidator(JDA jda, GameServerRepository serverRepository, 
+                                  PlayerRepository playerRepository, SftpConnector connector) {
+        this.connector = connector;
+        // Other parameters are stored for future use
     }
     
     /**
