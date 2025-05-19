@@ -1,190 +1,160 @@
 package com.deadside.bot.parsers.fixes;
 
 import com.deadside.bot.db.models.GameServer;
-import com.deadside.bot.sftp.SftpConnector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
- * Fixes and utilities for the log parser to ensure proper data handling
- * and isolation between different Discord servers
+ * Fixes for log file parsing
  */
 public class LogParserFix {
     private static final Logger logger = LoggerFactory.getLogger(LogParserFix.class);
     
     /**
-     * Validate and check if a remote file exists on the SFTP server
-     * @param connector The SFTP connector to use
-     * @param server The game server to check
-     * @param filePath The remote file path to check
-     * @return True if the file exists and is accessible
+     * Process a server log file
+     * @param logContent The log file content
+     * @param server The game server
+     * @return Summary of processing
      */
-    public static boolean checkFileExists(SftpConnector connector, GameServer server, String filePath) {
+    public static LogProcessingSummary processServerLog(String logContent, GameServer server) {
+        LogProcessingSummary summary = new LogProcessingSummary();
+        
         try {
-            if (connector == null || server == null || filePath == null || filePath.isEmpty()) {
-                return false;
+            if (logContent == null || logContent.isEmpty()) {
+                logger.warn("Empty log content for server {}", server.getName());
+                return summary;
             }
             
-            // Check if server has valid isolation fields
-            if (server.getGuildId() <= 0) {
-                logger.warn("Cannot check file existence for server without proper guild ID: {}", 
-                    server.getName());
-                return false;
-            }
+            // Split into lines
+            String[] lines = logContent.split("\n");
+            List<String> newLines = new ArrayList<>();
             
-            // In a real implementation, this would connect to the SFTP server and check
-            // For now, just validate parameters
-            logger.debug("Checking if file exists: {} for server {} with guild isolation {}",
-                filePath, server.getName(), server.getGuildId());
+            // Detect log rotation
+            boolean rotationDetected = detectLogRotation(lines);
+            summary.setRotationDetected(rotationDetected);
+            
+            // Process each line
+            for (String line : lines) {
+                if (line == null || line.trim().isEmpty()) {
+                    continue;
+                }
                 
-            return connector.fileExists(server, filePath);
+                // Process the line (in a real implementation)
+                // Here we just count the lines and events
+                newLines.add(line);
+                
+                // Count events based on log patterns
+                if (line.contains("Server started") || 
+                    line.contains("Player connected") || 
+                    line.contains("Player disconnected")) {
+                    summary.incrementTotalEvents();
+                }
+            }
+            
+            summary.setNewLines(newLines);
+            logger.info("Processed {} lines and found {} events in log for server {}", 
+                newLines.size(), summary.getTotalEvents(), server.getName());
+            
+            return summary;
         } catch (Exception e) {
-            logger.error("Error checking if file exists: {} for server {}: {}", 
-                filePath, server != null ? server.getName() : "unknown", e.getMessage(), e);
+            logger.error("Error processing server log: {}", e.getMessage(), e);
+            return summary;
+        }
+    }
+    
+    /**
+     * Detect log rotation in server logs
+     * @param lines The log lines
+     * @return True if rotation detected
+     */
+    private static boolean detectLogRotation(String[] lines) {
+        if (lines == null || lines.length < 2) {
             return false;
         }
-    }
-    
-    /**
-     * Process and validate log files with proper guild isolation
-     * @param server The game server to process logs for
-     * @param connector The SFTP connector to use
-     * @param processAll Whether to process all logs or just new ones
-     * @return Number of log entries processed
-     */
-    public static int processAndValidateLogs(GameServer server, SftpConnector connector, boolean processAll) {
-        try {
-            if (server == null || connector == null) {
-                return 0;
+        
+        // Check for timestamp reversal, which indicates rotation
+        String firstLine = lines[0];
+        String lastLine = lines[lines.length - 1];
+        
+        // Extract timestamps (this is a simplified example)
+        String firstTimestamp = extractTimestamp(firstLine);
+        String lastTimestamp = extractTimestamp(lastLine);
+        
+        if (firstTimestamp != null && lastTimestamp != null) {
+            // Compare timestamps - if first is after last, rotation detected
+            try {
+                return firstTimestamp.compareTo(lastTimestamp) > 0;
+            } catch (Exception e) {
+                logger.debug("Error comparing log timestamps: {}", e.getMessage());
             }
-            
-            // Check if server has valid isolation fields
-            if (server.getGuildId() <= 0) {
-                logger.warn("Cannot process logs for server without proper guild ID: {}", 
-                    server.getName());
-                return 0;
-            }
-            
-            // In a real implementation, this would process and validate logs
-            // For now, just validate parameters
-            logger.info("Processing logs for server {} with guild isolation {}, processAll={}",
-                server.getName(), server.getGuildId(), processAll);
-                
-            // This is just a placeholder - real implementation would process actual logs
-            return 0;
-        } catch (Exception e) {
-            logger.error("Error processing and validating logs for server {}: {}", 
-                server != null ? server.getName() : "unknown", e.getMessage(), e);
-            return 0;
         }
+        
+        return false;
     }
     
     /**
-     * Process server log with proper isolation
-     * @param jda The JDA instance
-     * @param server The game server with proper isolation fields
-     * @param connector The SFTP connector to use
-     * @return Processing summary
+     * Extract timestamp from a log line
+     * @param line The log line
+     * @return The timestamp
      */
-    public static LogProcessingSummary processServerLog(net.dv8tion.jda.api.JDA jda, 
-                                                      GameServer server, 
-                                                      SftpConnector connector) {
-        try {
-            if (server == null || connector == null) {
-                return new LogProcessingSummary(0, 0, 0, false);
-            }
-            
-            // Check if server has valid isolation fields
-            if (server.getGuildId() <= 0) {
-                logger.warn("Cannot process server log for server without proper guild ID: {}", 
-                    server.getName());
-                return new LogProcessingSummary(0, 0, 0, false);
-            }
-            
-            logger.info("Processing server log with rotation detection for {} with guild isolation {}",
-                server.getName(), server.getGuildId());
-                
-            // This is a placeholder implementation
-            return new LogProcessingSummary(0, 0, 0, true);
-        } catch (Exception e) {
-            logger.error("Error processing server log with rotation detection for {}: {}", 
-                server != null ? server.getName() : "unknown", e.getMessage(), e);
-            return new LogProcessingSummary(0, 0, 0, false);
+    private static String extractTimestamp(String line) {
+        if (line == null || line.isEmpty()) {
+            return null;
         }
+        
+        // This is a simplified example - actual implementation would depend on log format
+        // Assuming format like "[2025-05-19 08:30:45]"
+        try {
+            int startBracket = line.indexOf('[');
+            int endBracket = line.indexOf(']');
+            
+            if (startBracket >= 0 && endBracket > startBracket) {
+                return line.substring(startBracket + 1, endBracket);
+            }
+        } catch (Exception e) {
+            logger.debug("Error extracting timestamp: {}", e.getMessage());
+        }
+        
+        return null;
     }
     
     /**
-     * Log processing summary class for tracking results
+     * Summary of log processing
      */
     public static class LogProcessingSummary {
-        private final int linesProcessed;
-        private final int eventsProcessed;
-        private final int errorCount;
-        private final boolean successful;
-        private final int newLines;
-        private final int totalEvents;
-        private final boolean rotationDetected;
+        private List<String> newLines = new ArrayList<>();
+        private int totalEvents = 0;
+        private boolean rotationDetected = false;
         
-        public LogProcessingSummary(int linesProcessed, int eventsProcessed, int errorCount, boolean successful) {
-            this.linesProcessed = linesProcessed;
-            this.eventsProcessed = eventsProcessed;
-            this.errorCount = errorCount;
-            this.successful = successful;
-            this.newLines = linesProcessed;
-            this.totalEvents = eventsProcessed;
-            this.rotationDetected = false;
-        }
-        
-        public LogProcessingSummary(int linesProcessed, int eventsProcessed, int errorCount, boolean successful, 
-                                   int newLines, int totalEvents, boolean rotationDetected) {
-            this.linesProcessed = linesProcessed;
-            this.eventsProcessed = eventsProcessed;
-            this.errorCount = errorCount;
-            this.successful = successful;
-            this.newLines = newLines;
-            this.totalEvents = totalEvents;
-            this.rotationDetected = rotationDetected;
-        }
-        
-        public int getLinesProcessed() {
-            return linesProcessed;
-        }
-        
-        public int getEventsProcessed() {
-            return eventsProcessed;
-        }
-        
-        public int getErrorCount() {
-            return errorCount;
-        }
-        
-        public boolean isSuccessful() {
-            return successful;
-        }
-        
-        public int getNewLines() {
+        public List<String> getNewLines() {
             return newLines;
+        }
+        
+        public void setNewLines(List<String> newLines) {
+            this.newLines = newLines;
         }
         
         public int getTotalEvents() {
             return totalEvents;
         }
         
+        public void setTotalEvents(int totalEvents) {
+            this.totalEvents = totalEvents;
+        }
+        
+        public void incrementTotalEvents() {
+            totalEvents++;
+        }
+        
         public boolean isRotationDetected() {
             return rotationDetected;
         }
         
-        @Override
-        public String toString() {
-            return "LogProcessingSummary{" +
-                "linesProcessed=" + linesProcessed +
-                ", eventsProcessed=" + eventsProcessed +
-                ", errorCount=" + errorCount +
-                ", successful=" + successful +
-                ", newLines=" + newLines +
-                ", totalEvents=" + totalEvents +
-                ", rotationDetected=" + rotationDetected +
-                '}';
+        public void setRotationDetected(boolean rotationDetected) {
+            this.rotationDetected = rotationDetected;
         }
     }
 }

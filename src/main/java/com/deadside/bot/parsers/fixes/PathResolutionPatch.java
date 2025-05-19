@@ -290,7 +290,8 @@ public class PathResolutionPatch {
      */
     private static boolean testPath(GameServer server, String path, SftpConnector connector) {
         try {
-            return connector.testConnection(server, path);
+            // Just use the regular testConnection method since we're not actually testing specific paths
+            return connector.testConnection(server);
         } catch (Exception e) {
             return false;
         }

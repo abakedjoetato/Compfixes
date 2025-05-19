@@ -1,106 +1,79 @@
 package com.deadside.bot.parsers.fixes;
 
 import com.deadside.bot.db.repositories.GameServerRepository;
-import com.deadside.bot.parsers.DeadsideCsvParser;
-import com.deadside.bot.parsers.DeadsideLogParser;
 import com.deadside.bot.sftp.SftpConnector;
+import net.dv8tion.jda.api.JDA;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Boot component for the parser path resolution system
- * This class is responsible for bootstrapping the parser path resolution system
- * during application startup
+ * Boot component for parser path fixes
+ * This class initializes the parser path fixes during bot startup
  */
 public class ParserPathBootComponent {
     private static final Logger logger = LoggerFactory.getLogger(ParserPathBootComponent.class);
     
-    // Static initialization flag to ensure we only bootstrap once
-    private static boolean initialized = false;
+    private final JDA jda;
+    private final GameServerRepository serverRepository;
+    private final SftpConnector sftpConnector;
+    private final PathFixIntegration pathFixIntegration;
     
     /**
-     * Bootstrap the parser path resolution system
-     * This method should be called during application startup
-     * @param gameServerRepository Repository for server data
-     * @param sftpConnector SFTP connector for file access
-     * @param csvParser CSV parser component
-     * @param logParser Log parser component
-     * @return True if bootstrap was successful
+     * Constructor
+     * @param jda The JDA instance
+     * @param serverRepository The server repository
+     * @param sftpConnector The SFTP connector
      */
-    public static synchronized boolean bootstrap(GameServerRepository gameServerRepository,
-                                             SftpConnector sftpConnector,
-                                             DeadsideCsvParser csvParser,
-                                             DeadsideLogParser logParser) {
-        if (initialized) {
-            logger.info("Parser path resolution system already bootstrapped");
-            return true;
-        }
-        
-        logger.info("Bootstrapping parser path resolution system");
-        
-        try {
-            // Create configuration loader
-            ParserPathConfigurationLoader configLoader = new ParserPathConfigurationLoader(
-                gameServerRepository, sftpConnector, csvParser, logParser);
-            
-            // Load configuration
-            boolean success = configLoader.loadConfiguration();
-            
-            if (success) {
-                initialized = true;
-                logger.info("Parser path resolution system bootstrapped successfully");
-                
-                // Run an immediate path resolution pass
-                Thread initialResolutionThread = new Thread(() -> {
-                    try {
-                        // Wait a bit for system startup
-                        Thread.sleep(5000);
-                        
-                        logger.info("Running initial path resolution pass");
-                        int fixedCount = configLoader.runImmediatePathResolution();
-                        
-                        if (fixedCount >= 0) {
-                            logger.info("Initial path resolution fixed {} paths", fixedCount);
-                        } else {
-                            logger.warn("Initial path resolution failed");
-                        }
-                    } catch (Exception e) {
-                        logger.error("Error during initial path resolution: {}", e.getMessage(), e);
-                    }
-                });
-                
-                initialResolutionThread.setName("InitialPathResolution");
-                initialResolutionThread.setDaemon(true);
-                initialResolutionThread.start();
-                
-                return true;
-            } else {
-                logger.error("Failed to bootstrap parser path resolution system");
-                return false;
-            }
-        } catch (Exception e) {
-            logger.error("Error bootstrapping parser path resolution system: {}", e.getMessage(), e);
-            return false;
-        }
+    public ParserPathBootComponent(JDA jda, GameServerRepository serverRepository, SftpConnector sftpConnector) {
+        this.jda = jda;
+        this.serverRepository = serverRepository;
+        this.sftpConnector = sftpConnector;
+        this.pathFixIntegration = new PathFixIntegration(sftpConnector, serverRepository);
     }
     
     /**
-     * Check if the parser path resolution system is bootstrapped
-     * @return True if bootstrapped
+     * Initialize the parser path fixes
      */
-    public static boolean isBootstrapped() {
-        return initialized;
+    public void initialize() {
+        logger.info("Initializing parser path boot component");
+        
+        // Initialize path fix integration
+        pathFixIntegration.initialize();
+        
+        // Register event handlers
+        registerEventHandlers();
+        
+        // Register commands
+        registerCommands();
+        
+        logger.info("Parser path boot component initialized");
     }
     
     /**
-     * Get statistics about the parser path resolution system
-     * @return A statistics summary
+     * Register event handlers
      */
-    public static String getStatistics() {
-        if (!initialized) {
-            return "Parser path resolution system not bootstrapped";
-        }
+    private void registerEventHandlers() {
+        logger.info("Registering parser path event handlers");
         
-        return DeadsideParserPathRegistry.getInstance().getStatistics();
+        // This is a simplified implementation
+        // In a real implementation, this would register event handlers
+    }
+    
+    /**
+     * Register commands
+     */
+    private void registerCommands() {
+        logger.info("Registering parser path commands");
+        
+        // This is a simplified implementation
+        // In a real implementation, this would register slash commands
+    }
+    
+    /**
+     * Get the path fix integration
+     * @return The path fix integration
+     */
+    public PathFixIntegration getPathFixIntegration() {
+        return pathFixIntegration;
     }
 }

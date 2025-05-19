@@ -1,117 +1,115 @@
 package com.deadside.bot.parsers.fixes;
 
 import com.deadside.bot.db.models.GameServer;
-import com.deadside.bot.db.repositories.GameServerRepository;
-import com.deadside.bot.sftp.PathResolutionFix;
 import com.deadside.bot.sftp.SftpConnector;
+import com.deadside.bot.sftp.SftpPathUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Extensions for parser classes to handle path resolution
- * This class provides static methods that can be called from parsers
+ * Parser extensions for Deadside
+ * This class provides extensions and utilities for the parsers
  */
 public class ParserExtensions {
     private static final Logger logger = LoggerFactory.getLogger(ParserExtensions.class);
     
-    // Components
-    private static GameServerRepository gameServerRepository;
-    private static SftpConnector sftpConnector;
-    
-    // Initialization flag
-    private static boolean initialized = false;
-    
     /**
-     * Initialize the parser extensions
-     * @param serverRepository Server repository
-     * @param connector SFTP connector
+     * Resolve and update CSV path for a server
+     * @param server The game server
+     * @param connector The SFTP connector
+     * @return True if successful
      */
-    public static synchronized void initialize(
-            GameServerRepository serverRepository, 
-            SftpConnector connector) {
-        
-        if (initialized) {
-            return;
-        }
-        
-        gameServerRepository = serverRepository;
-        sftpConnector = connector;
-        initialized = true;
-        
-        logger.info("Parser extensions initialized");
-    }
-    
-    /**
-     * Process CSV path for a server
-     * @param server The server
-     * @param originalPath Original path
-     * @return Fixed path or original if not applicable
-     */
-    public static String processCsvPath(GameServer server, String originalPath) {
-        if (!initialized || server == null) {
-            return originalPath;
-        }
-        
+    public static boolean resolveAndUpdateCsvPath(GameServer server, SftpConnector connector) {
         try {
-            // Use PathResolutionFix to get the correct path
-            String resolvedPath = PathResolutionFix.resolveCsvPath(server, sftpConnector);
+            logger.info("Resolving and updating CSV path for server: {}", server.getName());
             
-            if (resolvedPath != null && !resolvedPath.equals(originalPath)) {
-                // Update the server
-                server.setDeathlogsDirectory(resolvedPath);
-                gameServerRepository.save(server);
-                
-                logger.debug("Fixed CSV path for server {}: {} -> {}", 
-                    server.getName(), originalPath, resolvedPath);
-                
-                return resolvedPath;
+            // Find valid path
+            String csvPath = SftpPathUtils.findCsvPath(server, connector);
+            
+            if (csvPath == null) {
+                logger.warn("Could not find valid CSV path for server: {}", server.getName());
+                return false;
             }
+            
+            // Update server
+            String originalPath = server.getDeathlogsDirectory();
+            server.setDeathlogsDirectory(csvPath);
+            
+            // Register path
+            ParserIntegrationHooks.recordSuccessfulCsvPath(server, csvPath);
+            
+            logger.info("Updated CSV path for server {}: {} -> {}", 
+                server.getName(), originalPath, csvPath);
+            
+            return true;
         } catch (Exception e) {
-            logger.error("Error processing CSV path for server {}: {}", 
+            logger.error("Error resolving and updating CSV path for server {}: {}", 
                 server.getName(), e.getMessage(), e);
+            return false;
         }
-        
-        return originalPath;
     }
     
     /**
-     * Process Log path for a server
-     * @param server The server
-     * @param originalPath Original path
-     * @return Fixed path or original if not applicable
+     * Resolve and update log path for a server
+     * @param server The game server
+     * @param connector The SFTP connector
+     * @return True if successful
      */
-    public static String processLogPath(GameServer server, String originalPath) {
-        if (!initialized || server == null) {
-            return originalPath;
-        }
-        
+    public static boolean resolveAndUpdateLogPath(GameServer server, SftpConnector connector) {
         try {
-            // Use PathResolutionFix to get the correct path
-            String resolvedPath = PathResolutionFix.resolveLogPath(server, sftpConnector);
+            logger.info("Resolving and updating log path for server: {}", server.getName());
             
-            if (resolvedPath != null && !resolvedPath.equals(originalPath)) {
-                // Update the server
-                server.setLogDirectory(resolvedPath);
-                gameServerRepository.save(server);
-                
-                logger.debug("Fixed log path for server {}: {} -> {}", 
-                    server.getName(), originalPath, resolvedPath);
-                
-                return resolvedPath;
+            // Find valid path
+            String logPath = SftpPathUtils.findLogPath(server, connector);
+            
+            if (logPath == null) {
+                logger.warn("Could not find valid log path for server: {}", server.getName());
+                return false;
             }
+            
+            // Update server
+            String originalPath = server.getLogDirectory();
+            server.setLogDirectory(logPath);
+            
+            // Register path
+            ParserIntegrationHooks.recordSuccessfulLogPath(server, logPath);
+            
+            logger.info("Updated log path for server {}: {} -> {}", 
+                server.getName(), originalPath, logPath);
+            
+            return true;
         } catch (Exception e) {
-            logger.error("Error processing log path for server {}: {}", 
+            logger.error("Error resolving and updating log path for server {}: {}", 
                 server.getName(), e.getMessage(), e);
+            return false;
         }
-        
-        return originalPath;
     }
     
     /**
-     * Check if extensions are initialized
-     * @return True if initialized
+     * Check if paths need resolution
+     * @param server The game server
+     * @param connector The SFTP connector
+     * @return True if paths need resolution
      */
-    public static boolean isInitialized() {
-        return initialized;
+    public static boolean needsPathResolution(GameServer server, SftpConnector connector) {
+        try {
+            logger.debug("Checking if paths need resolution for server: {}", server.getName());
+            
+            // Check if CSV files can be found
+            boolean csvFilesFound = !connector.findDeathlogFiles(server).isEmpty();
+            
+            // Check if log file can be found
+            boolean logFileFound = connector.findLogFile(server) != null;
+            
+            boolean needsResolution = !csvFilesFound || !logFileFound;
+            
+            logger.debug("Server {} needs path resolution: {}", server.getName(), needsResolution);
+            
+            return needsResolution;
+        } catch (Exception e) {
+            logger.error("Error checking if paths need resolution for server {}: {}", 
+                server.getName(), e.getMessage(), e);
+            return true;
+        }
     }
 }

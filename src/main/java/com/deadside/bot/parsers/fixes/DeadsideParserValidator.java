@@ -2,156 +2,154 @@ package com.deadside.bot.parsers.fixes;
 
 import com.deadside.bot.db.models.GameServer;
 import com.deadside.bot.db.repositories.GameServerRepository;
-import com.deadside.bot.db.repositories.PlayerRepository;
-import com.deadside.bot.sftp.PathResolutionFix;
+import com.deadside.bot.parsers.DeadsideCsvParser;
+import com.deadside.bot.parsers.DeadsideLogParser;
 import com.deadside.bot.sftp.SftpConnector;
-import net.dv8tion.jda.api.JDA;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
- * Validator for Deadside server parsers
- * This class helps diagnose and validate parser path configurations
+ * Validator for Deadside parser components
+ * This class provides functionality to validate the parser components
  */
 public class DeadsideParserValidator {
     private static final Logger logger = LoggerFactory.getLogger(DeadsideParserValidator.class);
     
-    private final JDA jda;
+    private final SftpConnector connector;
     private final GameServerRepository serverRepository;
-    private final PlayerRepository playerRepository;
-    private final SftpConnector sftpConnector;
+    private final DeadsideCsvParser csvParser;
+    private final DeadsideLogParser logParser;
     
     /**
      * Constructor
-     * @param jda The JDA instance
+     * @param connector The SFTP connector
      * @param serverRepository The server repository
-     * @param playerRepository The player repository
-     * @param sftpConnector The SFTP connector
+     * @param csvParser The CSV parser
+     * @param logParser The log parser
      */
-    public DeadsideParserValidator(JDA jda, GameServerRepository serverRepository, 
-                                 PlayerRepository playerRepository, SftpConnector sftpConnector) {
-        this.jda = jda;
+    public DeadsideParserValidator(
+            SftpConnector connector,
+            GameServerRepository serverRepository,
+            DeadsideCsvParser csvParser,
+            DeadsideLogParser logParser) {
+        
+        this.connector = connector;
         this.serverRepository = serverRepository;
-        this.playerRepository = playerRepository;
-        this.sftpConnector = sftpConnector;
+        this.csvParser = csvParser;
+        this.logParser = logParser;
     }
     
     /**
-     * Validate a server configuration
-     * @param server The server to validate
-     * @return Validation results
+     * Validate basic functionality of parser components
      */
-    public ValidationResults validateServer(GameServer server) {
-        ValidationResults results = new ValidationResults();
+    public void validateBasicFunctionality() {
+        logger.info("Validating basic functionality of parser components");
         
+        Map<String, Boolean> results = new HashMap<>();
+        
+        // Check if connector is available
+        results.put("connector", connector != null);
+        
+        // Check if repository is available
+        results.put("repository", serverRepository != null);
+        
+        // Check if parsers are available
+        results.put("csvParser", csvParser != null);
+        results.put("logParser", logParser != null);
+        
+        // Log results
+        for (Map.Entry<String, Boolean> entry : results.entrySet()) {
+            logger.info("Component {} validated: {}", entry.getKey(), entry.getValue());
+        }
+    }
+    
+    /**
+     * Validate path resolution
+     * @param serverId The server ID to validate
+     * @return True if validation passed
+     */
+    public boolean validatePathResolution(Long serverId) {
         try {
-            // Basic connection test
-            boolean connectionOk = sftpConnector.testConnection(server);
-            results.setConnectionStatus(connectionOk);
+            logger.info("Validating path resolution for server ID: {}", serverId);
             
-            if (!connectionOk) {
-                logger.warn("Connection test failed for server {}", server.getName());
-                results.addIssue("Connection test failed");
-                return results;
+            // Find server
+            GameServer server = serverRepository.findById(serverId).orElse(null);
+            
+            if (server == null) {
+                logger.warn("Server not found: {}", serverId);
+                return false;
             }
             
-            // CSV file discovery test
-            List<String> csvFiles = PathResolutionFix.findCsvFilesWithFallback(server, sftpConnector);
+            // Create path finder
+            ParserPathFinder pathFinder = new ParserPathFinder(connector);
             
-            if (csvFiles.isEmpty()) {
-                logger.warn("No CSV files found for server {}", server.getName());
-                results.addIssue("No CSV files found");
-                results.setCsvFilesFound(false);
-            } else {
-                logger.info("Found {} CSV files for server {}", csvFiles.size(), server.getName());
-                results.setCsvFilesFound(true);
-                results.setCsvFileCount(csvFiles.size());
-            }
+            // Find valid paths
+            String csvPath = pathFinder.findValidCsvPath(server);
+            String logPath = pathFinder.findValidLogPath(server);
             
-            // Log file discovery test
-            String logFile = PathResolutionFix.findLogFileWithFallback(server, sftpConnector);
+            // Log results
+            logger.info("Valid CSV path for server {}: {}", server.getName(), csvPath);
+            logger.info("Valid log path for server {}: {}", server.getName(), logPath);
             
-            if (logFile == null || logFile.isEmpty()) {
-                logger.warn("No log file found for server {}", server.getName());
-                results.addIssue("No log file found");
-                results.setLogFileFound(false);
-            } else {
-                logger.info("Found log file for server {}: {}", server.getName(), logFile);
-                results.setLogFileFound(true);
-            }
-            
-            // Overall validity
-            boolean isValid = connectionOk && results.isCsvFilesFound() && results.isLogFileFound();
-            results.setIsValid(isValid);
-            
-            return results;
+            return csvPath != null && logPath != null;
         } catch (Exception e) {
-            logger.error("Error validating server {}: {}", server.getName(), e.getMessage(), e);
-            results.addIssue("Validation error: " + e.getMessage());
-            results.setIsValid(false);
-            return results;
+            logger.error("Error validating path resolution: {}", e.getMessage(), e);
+            return false;
         }
     }
     
     /**
-     * Validation results class
+     * Validate path resolution for all servers
+     * @return List of server IDs that passed validation
      */
-    public static class ValidationResults {
-        private boolean isValid;
-        private boolean connectionStatus;
-        private boolean csvFilesFound;
-        private boolean logFileFound;
-        private int csvFileCount;
-        private final List<String> issues = new java.util.ArrayList<>();
-        
-        public boolean isValid() {
-            return isValid;
-        }
-        
-        public void setIsValid(boolean isValid) {
-            this.isValid = isValid;
-        }
-        
-        public boolean isConnectionStatus() {
-            return connectionStatus;
-        }
-        
-        public void setConnectionStatus(boolean connectionStatus) {
-            this.connectionStatus = connectionStatus;
-        }
-        
-        public boolean isCsvFilesFound() {
-            return csvFilesFound;
-        }
-        
-        public void setCsvFilesFound(boolean csvFilesFound) {
-            this.csvFilesFound = csvFilesFound;
-        }
-        
-        public boolean isLogFileFound() {
-            return logFileFound;
-        }
-        
-        public void setLogFileFound(boolean logFileFound) {
-            this.logFileFound = logFileFound;
-        }
-        
-        public int getCsvFileCount() {
-            return csvFileCount;
-        }
-        
-        public void setCsvFileCount(int csvFileCount) {
-            this.csvFileCount = csvFileCount;
-        }
-        
-        public List<String> getIssues() {
-            return new java.util.ArrayList<>(issues);
-        }
-        
-        public void addIssue(String issue) {
-            issues.add(issue);
+    public List<Long> validateAllServers() {
+        try {
+            logger.info("Validating path resolution for all servers");
+            
+            // Find all servers
+            List<GameServer> servers = serverRepository.findAll();
+            
+            if (servers == null || servers.isEmpty()) {
+                logger.warn("No servers found");
+                return new ArrayList<>();
+            }
+            
+            List<Long> passedServers = new ArrayList<>();
+            
+            // Validate each server
+            for (GameServer server : servers) {
+                try {
+                    // Create path finder
+                    ParserPathFinder pathFinder = new ParserPathFinder(connector);
+                    
+                    // Find valid paths
+                    String csvPath = pathFinder.findValidCsvPath(server);
+                    String logPath = pathFinder.findValidLogPath(server);
+                    
+                    boolean passed = csvPath != null && logPath != null;
+                    
+                    if (passed) {
+                        passedServers.add(Long.parseLong(server.getId().toString()));
+                    }
+                    
+                    // Log results
+                    logger.info("Server {} validated: {}", server.getName(), passed);
+                } catch (Exception e) {
+                    logger.error("Error validating server {}: {}", server.getName(), e.getMessage(), e);
+                }
+            }
+            
+            logger.info("Validated {}/{} servers", passedServers.size(), servers.size());
+            
+            return passedServers;
+        } catch (Exception e) {
+            logger.error("Error validating all servers: {}", e.getMessage(), e);
+            return new ArrayList<>();
         }
     }
 }

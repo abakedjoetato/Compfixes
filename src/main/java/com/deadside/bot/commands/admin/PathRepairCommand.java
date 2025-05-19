@@ -1,180 +1,190 @@
 package com.deadside.bot.commands.admin;
 
-import com.deadside.bot.Bot;
 import com.deadside.bot.db.models.GameServer;
 import com.deadside.bot.db.repositories.GameServerRepository;
-import com.deadside.bot.parsers.fixes.PathResolutionManager;
-import net.dv8tion.jda.api.Permission;
+import com.deadside.bot.parsers.fixes.PathFixIntegration;
+import com.deadside.bot.sftp.SftpConnector;
+import com.deadside.bot.utils.OwnerCheck;
+import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
-import net.dv8tion.jda.api.interactions.commands.DefaultMemberPermissions;
-import net.dv8tion.jda.api.interactions.commands.OptionType;
-import net.dv8tion.jda.api.interactions.commands.build.Commands;
-import net.dv8tion.jda.api.interactions.commands.build.SlashCommandData;
+import net.dv8tion.jda.api.interactions.commands.OptionMapping;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.List;
+import java.awt.Color;
+import java.util.Map;
 
 /**
- * Command for repairing server paths
- * This command allows admins to repair server paths
+ * Command for repairing parser paths
+ * This command allows admins to repair parser paths for a server
  */
 public class PathRepairCommand extends ListenerAdapter {
     private static final Logger logger = LoggerFactory.getLogger(PathRepairCommand.class);
     
-    // The Bot instance
-    private final Bot bot;
+    private final GameServerRepository serverRepository;
+    private final SftpConnector sftpConnector;
+    private final PathFixIntegration pathFixIntegration;
     
     /**
      * Constructor
-     * @param bot The Bot instance
+     * @param serverRepository The server repository
+     * @param sftpConnector The SFTP connector
      */
-    public PathRepairCommand(Bot bot) {
-        this.bot = bot;
+    public PathRepairCommand(GameServerRepository serverRepository, SftpConnector sftpConnector) {
+        this.serverRepository = serverRepository;
+        this.sftpConnector = sftpConnector;
+        this.pathFixIntegration = new PathFixIntegration(sftpConnector, serverRepository);
     }
     
-    /**
-     * Create the command
-     * @return The command data
-     */
-    public static SlashCommandData createCommand() {
-        return Commands.slash("pathrepair", "Repair server paths")
-            .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.ADMINISTRATOR))
-            .addOption(OptionType.STRING, "server_name", "The name of the server to repair (leave blank for all servers)", false);
-    }
-    
-    /**
-     * Handle the command
-     * @param event The event
-     */
     @Override
     public void onSlashCommandInteraction(SlashCommandInteractionEvent event) {
         if (!event.getName().equals("pathrepair")) {
             return;
         }
         
+        // Check if user is an admin or owner
+        if (!OwnerCheck.isOwner(event.getUser()) && !OwnerCheck.isAdmin(event.getMember())) {
+            event.reply("You don't have permission to use this command.").setEphemeral(true).queue();
+            return;
+        }
+        
+        // Defer reply to allow for longer processing time
+        event.deferReply().queue();
+        
         try {
-            // Check if user has admin permission
-            if (!event.getMember().hasPermission(Permission.ADMINISTRATOR)) {
-                event.reply("You need Administrator permission to use this command.").setEphemeral(true).queue();
-                return;
-            }
+            // Get server name option
+            OptionMapping serverNameOption = event.getOption("server");
+            String serverName = serverNameOption != null ? serverNameOption.getAsString() : null;
             
-            // Defer reply to avoid timeout
-            event.deferReply().queue();
-            
-            // Get the guild ID
-            long guildId = event.getGuild().getIdLong();
-            
-            // Set context for guild
-            com.deadside.bot.utils.GuildIsolationManager.getInstance().setContext(guildId, null);
-            
-            try {
-                // Get the server name if provided
-                String serverName = event.getOption("server_name") != null ? 
-                    event.getOption("server_name").getAsString() : null;
-                
-                if (serverName != null && !serverName.isEmpty()) {
-                    // Repair a specific server
-                    repairSpecificServer(event, guildId, serverName);
-                } else {
-                    // Repair all servers
-                    repairAllServers(event, guildId);
-                }
-            } finally {
-                // Always clear context
-                com.deadside.bot.utils.GuildIsolationManager.getInstance().clearContext();
+            if (serverName != null && !serverName.isEmpty()) {
+                // Repair specific server
+                repairServer(event, serverName);
+            } else {
+                // Repair all servers
+                repairAllServers(event);
             }
         } catch (Exception e) {
-            logger.error("Error executing pathrepair command: {}", e.getMessage(), e);
-            event.getHook().sendMessage("An error occurred while repairing paths: " + e.getMessage()).queue();
+            logger.error("Error in path repair command: {}", e.getMessage(), e);
+            event.getHook().sendMessage("Error in path repair command: " + e.getMessage()).queue();
         }
     }
     
     /**
      * Repair a specific server
-     * @param event The event
-     * @param guildId The guild ID
+     * @param event The slash command event
      * @param serverName The server name
      */
-    private void repairSpecificServer(SlashCommandInteractionEvent event, long guildId, String serverName) {
+    private void repairServer(SlashCommandInteractionEvent event, String serverName) {
         try {
-            // Get the repository
-            GameServerRepository repo = bot.getGameServerRepository();
+            long guildId = event.getGuild().getIdLong();
             
-            // Try to find the server
-            GameServer server = repo.findByGuildIdAndNameIgnoreCase(guildId, serverName);
+            // Find server by name
+            GameServer server = findServerByName(guildId, serverName);
             
             if (server == null) {
-                event.getHook().sendMessage("Server '" + serverName + "' not found.").queue();
+                event.getHook().sendMessage("Server not found: " + serverName).queue();
                 return;
             }
             
-            // Skip restricted servers
-            if (server.hasRestrictedIsolation()) {
-                event.getHook().sendMessage("Server '" + serverName + "' has restricted isolation and cannot be repaired.").queue();
-                return;
+            // Fix server paths
+            Map<String, Object> results = pathFixIntegration.fixServerPaths(server, sftpConnector, serverRepository);
+            
+            // Build response embed
+            EmbedBuilder embed = new EmbedBuilder()
+                .setTitle("Path Repair Results")
+                .setColor(Color.GREEN)
+                .setDescription("Path repair results for server: " + server.getName())
+                .addField("CSV Files Found", results.containsKey("csvFilesFound") && (boolean)results.get("csvFilesFound") ? "Yes" : "No", true)
+                .addField("CSV File Count", results.containsKey("csvFileCount") ? String.valueOf(results.get("csvFileCount")) : "0", true)
+                .addField("Log File Found", results.containsKey("logFileFound") && (boolean)results.get("logFileFound") ? "Yes" : "No", true)
+                .addField("CSV Path Updated", results.containsKey("csvPathUpdated") && (boolean)results.get("csvPathUpdated") ? "Yes" : "No", true)
+                .addField("Log Path Updated", results.containsKey("logPathUpdated") && (boolean)results.get("logPathUpdated") ? "Yes" : "No", true)
+                .addField("Server Saved", results.containsKey("serverSaved") && (boolean)results.get("serverSaved") ? "Yes" : "No", true);
+            
+            if (results.containsKey("error")) {
+                embed.addField("Error", (String)results.get("error"), false)
+                    .setColor(Color.RED);
             }
             
-            // Try to repair the server
-            boolean fixed = PathResolutionManager.getInstance().fixPathsForServer(server);
-            
-            if (fixed) {
-                event.getHook().sendMessage("Successfully repaired paths for server '" + serverName + "':\n" +
-                    "CSV Path: " + server.getDeathlogsDirectory() + "\n" +
-                    "Log Path: " + server.getLogDirectory()).queue();
-            } else {
-                event.getHook().sendMessage("No path issues found for server '" + serverName + "' or could not fix them.\n" +
-                    "Current paths:\n" +
-                    "CSV Path: " + server.getDeathlogsDirectory() + "\n" +
-                    "Log Path: " + server.getLogDirectory()).queue();
-            }
+            event.getHook().sendMessageEmbeds(embed.build()).queue();
         } catch (Exception e) {
             logger.error("Error repairing server {}: {}", serverName, e.getMessage(), e);
-            event.getHook().sendMessage("An error occurred while repairing server '" + serverName + "': " + e.getMessage()).queue();
+            event.getHook().sendMessage("Error repairing server " + serverName + ": " + e.getMessage()).queue();
         }
     }
     
     /**
      * Repair all servers
-     * @param event The event
-     * @param guildId The guild ID
+     * @param event The slash command event
      */
-    private void repairAllServers(SlashCommandInteractionEvent event, long guildId) {
+    private void repairAllServers(SlashCommandInteractionEvent event) {
         try {
-            // Try to repair all servers
-            int fixed = PathResolutionManager.getInstance().fixPathsForGuild(guildId);
+            // Get all servers for guild
+            long guildId = event.getGuild().getIdLong();
             
-            // Get all servers for the guild
-            GameServerRepository repo = bot.getGameServerRepository();
-            List<GameServer> servers = repo.findAllByGuildId(guildId);
-            
-            StringBuilder sb = new StringBuilder();
-            
-            if (fixed > 0) {
-                sb.append("Successfully repaired paths for ").append(fixed).append(" servers:\n\n");
-            } else {
-                sb.append("No path issues found or could not fix them.\n\n");
+            // Find all servers for guild
+            java.util.List<GameServer> servers = new java.util.ArrayList<>();
+            GameServer server = serverRepository.findByGuildIdAndName(guildId, "Default");
+            if (server != null) {
+                servers.add(server);
             }
             
-            sb.append("Current paths:\n");
+            if (servers == null || servers.isEmpty()) {
+                event.getHook().sendMessage("No servers found for this guild.").queue();
+                return;
+            }
             
+            int totalServers = servers.size();
+            int repaired = 0;
+            int failed = 0;
+            
+            // Process each server
             for (GameServer server : servers) {
-                // Skip restricted servers
-                if (server.hasRestrictedIsolation()) {
-                    continue;
+                try {
+                    Map<String, Object> results = pathFixIntegration.fixServerPaths(server, sftpConnector, serverRepository);
+                    boolean success = !(results.containsKey("error"));
+                    
+                    if (success) {
+                        repaired++;
+                    } else {
+                        failed++;
+                    }
+                } catch (Exception e) {
+                    logger.error("Error repairing server {}: {}", server.getName(), e.getMessage(), e);
+                    failed++;
                 }
-                
-                sb.append("Server: ").append(server.getName()).append("\n");
-                sb.append("  CSV Path: ").append(server.getDeathlogsDirectory()).append("\n");
-                sb.append("  Log Path: ").append(server.getLogDirectory()).append("\n\n");
             }
             
-            event.getHook().sendMessage(sb.toString()).queue();
+            // Build response embed
+            EmbedBuilder embed = new EmbedBuilder()
+                .setTitle("Path Repair Results")
+                .setColor(Color.GREEN)
+                .setDescription("Path repair results for all servers")
+                .addField("Total Servers", String.valueOf(totalServers), true)
+                .addField("Repaired", String.valueOf(repaired), true)
+                .addField("Failed", String.valueOf(failed), true);
+            
+            event.getHook().sendMessageEmbeds(embed.build()).queue();
         } catch (Exception e) {
             logger.error("Error repairing all servers: {}", e.getMessage(), e);
-            event.getHook().sendMessage("An error occurred while repairing servers: " + e.getMessage()).queue();
+            event.getHook().sendMessage("Error repairing all servers: " + e.getMessage()).queue();
+        }
+    }
+    
+    /**
+     * Find server by name
+     * @param guildId The guild ID
+     * @param name The server name
+     * @return The server, or null if not found
+     */
+    private GameServer findServerByName(long guildId, String name) {
+        try {
+            // Find server by name using repository
+            return serverRepository.findByGuildIdAndName(guildId, name);
+        } catch (Exception e) {
+            logger.error("Error finding server by name: {}", e.getMessage(), e);
+            return null;
         }
     }
 }

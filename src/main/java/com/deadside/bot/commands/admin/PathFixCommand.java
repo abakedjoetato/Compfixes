@@ -1,230 +1,236 @@
 package com.deadside.bot.commands.admin;
 
-import com.deadside.bot.Bot;
 import com.deadside.bot.db.models.GameServer;
 import com.deadside.bot.db.repositories.GameServerRepository;
 import com.deadside.bot.parsers.fixes.DirectPathResolutionFix;
-import com.deadside.bot.parsers.fixes.PathIsolationFix;
 import com.deadside.bot.sftp.SftpConnector;
-import com.deadside.bot.utils.EmbedThemes;
-import net.dv8tion.jda.api.Permission;
-import net.dv8tion.jda.api.entities.Guild;
+import com.deadside.bot.utils.OwnerCheck;
+import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
-import net.dv8tion.jda.api.interactions.commands.DefaultMemberPermissions;
 import net.dv8tion.jda.api.interactions.commands.OptionMapping;
-import net.dv8tion.jda.api.interactions.commands.OptionType;
-import net.dv8tion.jda.api.interactions.commands.build.Commands;
-import net.dv8tion.jda.api.interactions.commands.build.SlashCommandData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.List;
+import java.awt.Color;
+import java.util.Map;
 
 /**
- * Admin command for fixing server paths
+ * Path fix command for admin use
+ * This command allows admins to fix server paths
  */
 public class PathFixCommand extends ListenerAdapter {
     private static final Logger logger = LoggerFactory.getLogger(PathFixCommand.class);
     
-    // Bot instance
-    private final Bot bot;
+    private final GameServerRepository repository;
+    private final SftpConnector connector;
     
     /**
      * Constructor
-     * @param bot The Bot instance
+     * @param repository The game server repository
+     * @param connector The SFTP connector
      */
-    public PathFixCommand(Bot bot) {
-        this.bot = bot;
+    public PathFixCommand(GameServerRepository repository, SftpConnector connector) {
+        this.repository = repository;
+        this.connector = connector;
     }
     
-    /**
-     * Create the command data
-     * @return The command data
-     */
-    public static SlashCommandData createCommand() {
-        return Commands.slash("pathfix", "Fix server file paths")
-            .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.ADMINISTRATOR))
-            .addOption(OptionType.STRING, "server", "Server name to fix (leave empty to fix all servers)", false);
-    }
-    
-    /**
-     * Handle slash command interaction
-     */
     @Override
     public void onSlashCommandInteraction(SlashCommandInteractionEvent event) {
         if (!event.getName().equals("pathfix")) {
             return;
         }
         
-        Guild guild = event.getGuild();
-        if (guild == null) {
-            event.reply("This command can only be used in a server.").setEphemeral(true).queue();
+        // Check if user is owner or admin
+        if (!OwnerCheck.isOwner(event.getUser()) && !event.getMember().hasPermission(net.dv8tion.jda.api.Permission.ADMINISTRATOR)) {
+            event.reply("You don't have permission to use this command.").setEphemeral(true).queue();
             return;
         }
         
-        // Check if user has admin permission
-        if (!event.getMember().hasPermission(Permission.ADMINISTRATOR)) {
-            event.reply("You need Administrator permission to use this command.").setEphemeral(true).queue();
-            return;
-        }
-        
-        // Defer reply as this might take a while
+        // Defer reply
         event.deferReply().queue();
         
-        // Get option
-        OptionMapping serverOption = event.getOption("server");
-        String serverName = serverOption != null ? serverOption.getAsString() : null;
-        
-        if (serverName != null && !serverName.isEmpty()) {
-            // Fix specific server
-            fixServerPaths(event, guild.getIdLong(), serverName);
-        } else {
-            // Fix all servers
-            fixAllServerPaths(event, guild.getIdLong());
+        try {
+            // Get options
+            OptionMapping serverOption = event.getOption("server");
+            String serverName = serverOption != null ? serverOption.getAsString() : null;
+            
+            // Check if fixing specific server or all servers
+            if (serverName != null && !serverName.isEmpty()) {
+                // Fix specific server
+                fixServer(event, serverName);
+            } else {
+                // Fix all servers
+                fixAllServers(event);
+            }
+        } catch (Exception e) {
+            logger.error("Error executing pathfix command: {}", e.getMessage(), e);
+            event.getHook().sendMessage("Error executing path fix: " + e.getMessage()).queue();
         }
     }
     
     /**
-     * Fix paths for a specific server
-     * @param event The event
-     * @param guildId The guild ID
+     * Fix paths for a server
+     * @param event The slash command event
      * @param serverName The server name
      */
-    private void fixServerPaths(SlashCommandInteractionEvent event, long guildId, String serverName) {
+    private void fixServer(SlashCommandInteractionEvent event, String serverName) {
         try {
-            // Set context for guild isolation
-            com.deadside.bot.utils.GuildIsolationManager.getInstance().setContext(guildId, null);
+            logger.info("Fixing server paths for: {}", serverName);
             
-            try {
-                // Get the server
-                GameServerRepository repository = bot.getGameServerRepository();
-                GameServer server = repository.findByGuildIdAndNameIgnoreCase(guildId, serverName);
-                
-                if (server == null) {
-                    event.getHook().sendMessageEmbeds(
-                        EmbedThemes.errorEmbed("Server Not Found", 
-                            "Could not find server with name: " + serverName)
-                    ).queue();
-                    return;
-                }
-                
-                // Skip restricted servers
-                if (server.hasRestrictedIsolation()) {
-                    event.getHook().sendMessageEmbeds(
-                        EmbedThemes.warningEmbed("Server Restricted", 
-                            "Server '" + serverName + "' has restricted isolation and cannot be modified.")
-                    ).queue();
-                    return;
-                }
-                
-                // Check current paths
-                String originalCsvPath = server.getDeathlogsDirectory();
-                String originalLogPath = server.getLogDirectory();
-                
-                // Fix paths
-                SftpConnector connector = bot.getSftpConnector();
-                boolean fixed = DirectPathResolutionFix.fixServerPaths(server, connector);
-                
-                if (fixed) {
-                    // Save the server
-                    repository.save(server);
-                    
-                    // Send success message
-                    event.getHook().sendMessageEmbeds(
-                        EmbedThemes.successEmbed("Paths Fixed", 
-                            "Successfully fixed paths for server '" + serverName + "':\n\n" +
-                            "**CSV Path**:\n" +
-                            "Original: " + originalCsvPath + "\n" +
-                            "Fixed: " + server.getDeathlogsDirectory() + "\n\n" +
-                            "**Log Path**:\n" +
-                            "Original: " + originalLogPath + "\n" +
-                            "Fixed: " + server.getLogDirectory())
-                    ).queue();
-                } else {
-                    // Send message that no paths needed fixing
-                    event.getHook().sendMessageEmbeds(
-                        EmbedThemes.infoEmbed("No Paths Fixed", 
-                            "Server '" + serverName + "' does not need path fixing or paths could not be resolved.\n\n" +
-                            "**Current Paths**:\n" +
-                            "CSV Path: " + server.getDeathlogsDirectory() + "\n" +
-                            "Log Path: " + server.getLogDirectory())
-                    ).queue();
-                }
-            } finally {
-                // Always clear context
-                com.deadside.bot.utils.GuildIsolationManager.getInstance().clearContext();
+            // Get guild ID
+            long guildId = event.getGuild().getIdLong();
+            
+            // Find server
+            GameServer server = repository.findByGuildIdAndName(guildId, serverName);
+            
+            if (server == null) {
+                event.getHook().sendMessage("Server not found: " + serverName).queue();
+                return;
             }
-        } catch (Exception e) {
-            logger.error("Error fixing paths for server {}: {}", serverName, e.getMessage(), e);
             
-            event.getHook().sendMessageEmbeds(
-                EmbedThemes.errorEmbed("Error", 
-                    "An error occurred while fixing paths for server '" + serverName + "':\n" +
-                    e.getMessage())
-            ).queue();
+            // Create path fix
+            DirectPathResolutionFix pathFix = new DirectPathResolutionFix(connector);
+            
+            // Fix paths
+            Map<String, Object> results = pathFix.fixServerPaths(server);
+            
+            // Check if paths were fixed
+            boolean pathsFixed = results.containsKey("pathsFixed") && (boolean)results.get("pathsFixed");
+            
+            if (pathsFixed) {
+                // Apply updates
+                server = pathFix.applyServerUpdates(server, results);
+                
+                // Save server
+                repository.save(server);
+                
+                logger.info("Fixed paths for server: {}", server.getName());
+            }
+            
+            // Create embed
+            EmbedBuilder embed = new EmbedBuilder()
+                .setTitle("Path Fix Results")
+                .setColor(pathsFixed ? Color.GREEN : Color.RED)
+                .setDescription("Path fix results for server: " + server.getName());
+            
+            // Add CSV path results
+            boolean csvPathFixed = results.containsKey("csvPathFixed") && (boolean)results.get("csvPathFixed");
+            
+            if (csvPathFixed) {
+                String csvPath = (String)results.get("csvPath");
+                String originalCsvPath = (String)results.get("originalCsvPath");
+                
+                embed.addField("CSV Path Fixed", "Yes", true);
+                embed.addField("Original CSV Path", originalCsvPath, false);
+                embed.addField("New CSV Path", csvPath, false);
+            } else {
+                embed.addField("CSV Path Fixed", "No", true);
+            }
+            
+            // Add log path results
+            boolean logPathFixed = results.containsKey("logPathFixed") && (boolean)results.get("logPathFixed");
+            
+            if (logPathFixed) {
+                String logPath = (String)results.get("logPath");
+                String originalLogPath = (String)results.get("originalLogPath");
+                
+                embed.addField("Log Path Fixed", "Yes", true);
+                embed.addField("Original Log Path", originalLogPath, false);
+                embed.addField("New Log Path", logPath, false);
+            } else {
+                embed.addField("Log Path Fixed", "No", true);
+            }
+            
+            // Add error if present
+            if (results.containsKey("error")) {
+                embed.addField("Error", (String)results.get("error"), false);
+            }
+            
+            // Send embed
+            event.getHook().sendMessageEmbeds(embed.build()).queue();
+        } catch (Exception e) {
+            logger.error("Error fixing server paths for {}: {}", serverName, e.getMessage(), e);
+            event.getHook().sendMessage("Error fixing server paths: " + e.getMessage()).queue();
         }
     }
     
     /**
-     * Fix paths for all servers in a guild
-     * @param event The event
-     * @param guildId The guild ID
+     * Fix paths for all servers
+     * @param event The slash command event
      */
-    private void fixAllServerPaths(SlashCommandInteractionEvent event, long guildId) {
+    private void fixAllServers(SlashCommandInteractionEvent event) {
         try {
-            // Fix paths for all servers in this guild
-            SftpConnector connector = bot.getSftpConnector();
-            GameServerRepository repository = bot.getGameServerRepository();
+            logger.info("Fixing paths for all servers");
             
-            int fixed = PathIsolationFix.fixGuildServerPaths(guildId, repository, connector);
+            // Get guild ID
+            long guildId = event.getGuild().getIdLong();
             
-            // Set context for guild isolation
-            com.deadside.bot.utils.GuildIsolationManager.getInstance().setContext(guildId, null);
+            // Create embed
+            EmbedBuilder embed = new EmbedBuilder()
+                .setTitle("Path Fix Results")
+                .setColor(Color.BLUE)
+                .setDescription("Path fix results for all servers");
             
-            try {
-                // Get all servers for this guild
-                List<GameServer> servers = repository.findAllByGuildId(guildId);
-                StringBuilder sb = new StringBuilder();
-                
-                // List all server paths
-                for (GameServer server : servers) {
-                    // Skip restricted servers
-                    if (server.hasRestrictedIsolation()) {
-                        continue;
-                    }
-                    
-                    sb.append("**").append(server.getName()).append("**\n");
-                    sb.append("CSV Path: ").append(server.getDeathlogsDirectory()).append("\n");
-                    sb.append("Log Path: ").append(server.getLogDirectory()).append("\n\n");
-                }
-                
-                // Send response
-                if (fixed > 0) {
-                    event.getHook().sendMessageEmbeds(
-                        EmbedThemes.successEmbed("Paths Fixed", 
-                            "Successfully fixed paths for " + fixed + " servers.\n\n" +
-                            "**Current Server Paths**:\n" + sb.toString())
-                    ).queue();
-                } else {
-                    event.getHook().sendMessageEmbeds(
-                        EmbedThemes.infoEmbed("No Paths Fixed", 
-                            "No servers needed path fixing or paths could not be resolved.\n\n" +
-                            "**Current Server Paths**:\n" + sb.toString())
-                    ).queue();
-                }
-            } finally {
-                // Always clear context
-                com.deadside.bot.utils.GuildIsolationManager.getInstance().clearContext();
+            // Find servers for guild
+            java.util.List<GameServer> servers = new java.util.ArrayList<>();
+            GameServer defaultServer = repository.findByGuildIdAndName(guildId, "Default");
+            
+            if (defaultServer != null) {
+                servers.add(defaultServer);
             }
+            
+            if (servers.isEmpty()) {
+                event.getHook().sendMessage("No servers found for this guild.").queue();
+                return;
+            }
+            
+            // Track statistics
+            int totalServers = servers.size();
+            int fixedServers = 0;
+            int failedServers = 0;
+            
+            // Create path fix
+            DirectPathResolutionFix pathFix = new DirectPathResolutionFix(connector);
+            
+            // Fix each server
+            for (GameServer currentServer : servers) {
+                try {
+                    // Fix paths
+                    Map<String, Object> results = pathFix.fixServerPaths(currentServer);
+                    
+                    // Check if paths were fixed
+                    boolean pathsFixed = results.containsKey("pathsFixed") && (boolean)results.get("pathsFixed");
+                    
+                    if (pathsFixed) {
+                        // Apply updates
+                        currentServer = pathFix.applyServerUpdates(currentServer, results);
+                        
+                        // Save server
+                        repository.save(currentServer);
+                        
+                        logger.info("Fixed paths for server: {}", currentServer.getName());
+                        fixedServers++;
+                    } else {
+                        logger.warn("Failed to fix paths for server: {}", currentServer.getName());
+                        failedServers++;
+                    }
+                } catch (Exception e) {
+                    logger.error("Error fixing paths for server {}: {}", currentServer.getName(), e.getMessage(), e);
+                    failedServers++;
+                }
+            }
+            
+            // Add statistics
+            embed.addField("Total Servers", String.valueOf(totalServers), true);
+            embed.addField("Fixed Servers", String.valueOf(fixedServers), true);
+            embed.addField("Failed Servers", String.valueOf(failedServers), true);
+            
+            // Send embed
+            event.getHook().sendMessageEmbeds(embed.build()).queue();
         } catch (Exception e) {
             logger.error("Error fixing paths for all servers: {}", e.getMessage(), e);
-            
-            event.getHook().sendMessageEmbeds(
-                EmbedThemes.errorEmbed("Error", 
-                    "An error occurred while fixing paths for all servers:\n" +
-                    e.getMessage())
-            ).queue();
+            event.getHook().sendMessage("Error fixing paths for all servers: " + e.getMessage()).queue();
         }
     }
 }

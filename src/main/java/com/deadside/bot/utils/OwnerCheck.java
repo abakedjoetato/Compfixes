@@ -1,55 +1,72 @@
 package com.deadside.bot.utils;
 
-import com.deadside.bot.config.Config;
+import net.dv8tion.jda.api.entities.Member;
+import net.dv8tion.jda.api.entities.User;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Arrays;
+import java.util.List;
+
 /**
- * Utility class to check if a user is the bot owner
+ * Utility class for checking owner and admin permissions
  */
 public class OwnerCheck {
     private static final Logger logger = LoggerFactory.getLogger(OwnerCheck.class);
     
+    // Configurable owner and admin IDs
+    private static final List<Long> OWNER_IDS = Arrays.asList(
+        // Add your owner IDs here
+        123456789012345678L
+    );
+    
     /**
-     * Check if the user executing the command is the bot owner
-     * @param event The slash command event
-     * @return True if the user is the bot owner, false otherwise
+     * Check if the user is an owner
+     * @param userId The user ID
+     * @return True if the user is an owner
      */
-    public static boolean isOwner(SlashCommandInteractionEvent event) {
-        try {
-            String ownerId = Config.getInstance().getBotOwnerId();
-            if (ownerId == null || ownerId.isEmpty()) {
-                logger.warn("Bot owner ID is not configured. Using application owner instead.");
-                return event.getUser().getId().equals(event.getJDA().retrieveApplicationInfo().complete().getOwner().getId());
-            }
-            
-            return event.getUser().getId().equals(ownerId);
-        } catch (Exception e) {
-            logger.error("Error checking if user is bot owner", e);
-            return false;
-        }
+    public static boolean isOwner(long userId) {
+        return OWNER_IDS.contains(userId);
     }
     
     /**
-     * Check if the specified user ID belongs to the bot owner
-     * @param userId The user ID to check
-     * @return True if the user ID belongs to the bot owner, false otherwise
+     * Check if the user is an owner
+     * @param user The user
+     * @return True if the user is an owner
      */
-    public static boolean isOwner(long userId) {
-        try {
-            String ownerId = Config.getInstance().getBotOwnerId();
-            if (ownerId == null || ownerId.isEmpty()) {
-                logger.warn("Bot owner ID is not configured. Cannot verify owner status by ID alone.");
-                return false;
-            }
-            
-            // Convert userId to String for comparison with ownerId
-            String userIdStr = String.valueOf(userId);
-            return userIdStr.equals(ownerId);
-        } catch (Exception e) {
-            logger.error("Error checking if user ID {} is bot owner", userId, e);
+    public static boolean isOwner(User user) {
+        if (user == null) {
             return false;
         }
+        
+        return isOwner(user.getIdLong());
+    }
+    
+    /**
+     * Check if the user is an owner
+     * @param event The slash command event
+     * @return True if the user is an owner
+     */
+    public static boolean isOwner(SlashCommandInteractionEvent event) {
+        if (event == null || event.getUser() == null) {
+            return false;
+        }
+        
+        return isOwner(event.getUser());
+    }
+    
+    /**
+     * Check if the member is an admin
+     * @param member The member
+     * @return True if the member is an admin
+     */
+    public static boolean isAdmin(Member member) {
+        if (member == null) {
+            return false;
+        }
+        
+        // Check if the member has administrator permission
+        return member.hasPermission(net.dv8tion.jda.api.Permission.ADMINISTRATOR);
     }
 }

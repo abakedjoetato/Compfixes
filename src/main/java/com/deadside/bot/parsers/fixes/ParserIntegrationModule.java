@@ -1,88 +1,93 @@
 package com.deadside.bot.parsers.fixes;
 
 import com.deadside.bot.db.repositories.GameServerRepository;
+import com.deadside.bot.parsers.DeadsideCsvParser;
+import com.deadside.bot.parsers.DeadsideLogParser;
 import com.deadside.bot.sftp.SftpConnector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Central module for parser path resolution fix
- * This provides a single entry point for the DeadsideBot to initialize the path resolution system
+ * Integration module for parser fixes
+ * This class provides integration between the parser fix components
  */
 public class ParserIntegrationModule {
     private static final Logger logger = LoggerFactory.getLogger(ParserIntegrationModule.class);
     
-    // Flag to indicate initialization
-    private static boolean initialized = false;
+    private final SftpConnector connector;
+    private final GameServerRepository serverRepository;
+    private final DeadsideCsvParser csvParser;
+    private final DeadsideLogParser logParser;
     
     /**
-     * Initialize the parser integration module
-     * @param gameServerRepository Game server repository
-     * @param sftpConnector SFTP connector
-     * @return True if initialization was successful
+     * Constructor
+     * @param connector The SFTP connector
+     * @param serverRepository The server repository
+     * @param csvParser The CSV parser
+     * @param logParser The log parser
      */
-    public static synchronized boolean initialize(
-            GameServerRepository gameServerRepository, 
-            SftpConnector sftpConnector) {
+    public ParserIntegrationModule(
+            SftpConnector connector,
+            GameServerRepository serverRepository,
+            DeadsideCsvParser csvParser,
+            DeadsideLogParser logParser) {
         
-        if (initialized) {
-            logger.info("Parser integration module already initialized");
-            return true;
-        }
+        this.connector = connector;
+        this.serverRepository = serverRepository;
+        this.csvParser = csvParser;
+        this.logParser = logParser;
+    }
+    
+    /**
+     * Initialize the integration module
+     */
+    public void initialize() {
+        logger.info("Initializing parser integration module");
         
         try {
-            logger.info("Initializing parser integration module");
+            // Initialize path resolution
+            PathFixIntegration pathFixIntegration = new PathFixIntegration(connector, serverRepository);
+            pathFixIntegration.initialize();
             
-            // Initialize ParserExtensions
-            ParserExtensions.initialize(gameServerRepository, sftpConnector);
-            
-            // Create and initialize PathFixIntegration
-            PathFixIntegration pathFixIntegration = new PathFixIntegration(gameServerRepository, sftpConnector);
-            
-            // Fix paths for all servers
-            int fixed = pathFixIntegration.fixAllServerPaths();
-            logger.info("Parser integration module initialized: fixed {} server paths", fixed);
-            
-            initialized = true;
-            return true;
+            logger.info("Parser integration module initialized");
         } catch (Exception e) {
             logger.error("Error initializing parser integration module: {}", e.getMessage(), e);
-            return false;
         }
     }
     
     /**
-     * Run path fix for all servers
-     * @param gameServerRepository Game server repository
-     * @param sftpConnector SFTP connector
-     * @return Number of servers fixed
+     * Run an immediate path fix for all servers
      */
-    public static int runPathFix(
-            GameServerRepository gameServerRepository,
-            SftpConnector sftpConnector) {
+    public void runImmediatePathFix() {
+        logger.info("Running immediate path fix for all servers");
         
         try {
-            if (!initialized) {
-                // Initialize if not already
-                initialize(gameServerRepository, sftpConnector);
-            }
+            // Initialize path resolution
+            PathFixIntegration pathFixIntegration = new PathFixIntegration(connector, serverRepository);
+            pathFixIntegration.initialize();
             
-            // Create PathFixIntegration
-            PathFixIntegration pathFixIntegration = new PathFixIntegration(gameServerRepository, sftpConnector);
+            // Run fix
+            pathFixIntegration.fixAllServerPaths();
             
-            // Fix paths for all servers
-            return pathFixIntegration.fixAllServerPaths();
+            logger.info("Immediate path fix completed");
         } catch (Exception e) {
-            logger.error("Error running path fix: {}", e.getMessage(), e);
-            return 0;
+            logger.error("Error running immediate path fix: {}", e.getMessage(), e);
         }
     }
     
     /**
-     * Check if the module is initialized
-     * @return True if initialized
+     * Get a parser adapter with path resolution capabilities
+     * @return The parser adapter
      */
-    public static boolean isInitialized() {
-        return initialized;
+    public DeadsideParserAdapter getParserAdapter() {
+        return new DeadsideParserAdapter(connector, csvParser, logParser);
+    }
+    
+    /**
+     * Get a path finder for parsers
+     * @return The path finder
+     */
+    public ParserPathFinder getPathFinder() {
+        return new ParserPathFinder(connector);
     }
 }

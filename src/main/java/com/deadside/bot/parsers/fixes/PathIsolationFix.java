@@ -6,101 +6,127 @@ import com.deadside.bot.sftp.SftpConnector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
- * Fixes for path isolation issues
- * This class provides utilities for fixing path isolation issues
- * with support for guild isolation
+ * Path isolation fix for Deadside parser issues
+ * This class provides functionality to isolate and fix path-related issues
  */
 public class PathIsolationFix {
     private static final Logger logger = LoggerFactory.getLogger(PathIsolationFix.class);
     
+    private final SftpConnector connector;
+    private final GameServerRepository repository;
+    
     /**
-     * Fix paths for all servers in a guild
-     * @param guildId The guild ID
-     * @param repository The game server repository
+     * Constructor
      * @param connector The SFTP connector
-     * @return Number of servers fixed
+     * @param repository The game server repository
      */
-    public static int fixGuildServerPaths(long guildId, 
-                                      GameServerRepository repository, 
-                                      SftpConnector connector) {
-        int fixed = 0;
+    public PathIsolationFix(SftpConnector connector, GameServerRepository repository) {
+        this.connector = connector;
+        this.repository = repository;
+    }
+    
+    /**
+     * Fix paths for a server
+     * @param server The game server
+     * @return Map of results
+     */
+    public Map<String, Object> fixPaths(GameServer server) {
+        Map<String, Object> results = new HashMap<>();
         
         try {
-            // Set context for guild isolation
-            com.deadside.bot.utils.GuildIsolationManager.getInstance().setContext(guildId, null);
+            logger.info("Fixing paths for server: {}", server.getName());
             
-            try {
-                // Get all servers for this guild
-                List<GameServer> servers = repository.findAllByGuildId(guildId);
-                List<GameServer> fixedServers = new ArrayList<>();
-                
-                for (GameServer server : servers) {
-                    // Skip restricted servers
-                    if (server.hasRestrictedIsolation()) {
-                        continue;
-                    }
-                    
-                    // Try to fix paths
-                    if (DirectPathResolutionFix.fixServerPaths(server, connector)) {
-                        fixedServers.add(server);
-                        fixed++;
-                    }
-                }
-                
-                // Save all fixed servers
-                if (!fixedServers.isEmpty()) {
-                    repository.saveAll(fixedServers);
-                    logger.info("Fixed paths for {} servers in guild {}", fixed, guildId);
-                }
-            } finally {
-                // Always clear context
-                com.deadside.bot.utils.GuildIsolationManager.getInstance().clearContext();
+            // Find valid CSV path
+            ParserPathFinder pathFinder = new ParserPathFinder(connector);
+            String csvPath = pathFinder.findValidCsvPath(server);
+            
+            if (csvPath != null) {
+                logger.info("Found valid CSV path: {}", csvPath);
+                server.setDeathlogsDirectory(csvPath);
+                results.put("csvPath", csvPath);
+                results.put("csvPathFixed", true);
+            } else {
+                logger.warn("Could not find valid CSV path");
+                results.put("csvPathFixed", false);
             }
+            
+            // Find valid log path
+            String logPath = pathFinder.findValidLogPath(server);
+            
+            if (logPath != null) {
+                logger.info("Found valid log path: {}", logPath);
+                server.setLogDirectory(logPath);
+                results.put("logPath", logPath);
+                results.put("logPathFixed", true);
+            } else {
+                logger.warn("Could not find valid log path");
+                results.put("logPathFixed", false);
+            }
+            
+            // Save server if paths were fixed
+            boolean csvPathFixed = results.containsKey("csvPathFixed") && (boolean)results.get("csvPathFixed");
+            boolean logPathFixed = results.containsKey("logPathFixed") && (boolean)results.get("logPathFixed");
+            
+            if (csvPathFixed || logPathFixed) {
+                repository.save(server);
+                results.put("saved", true);
+                logger.info("Server saved with fixed paths");
+            } else {
+                results.put("saved", false);
+                logger.warn("No paths fixed, server not saved");
+            }
+            
+            return results;
         } catch (Exception e) {
-            logger.error("Error fixing paths for guild {}: {}", guildId, e.getMessage(), e);
+            logger.error("Error fixing paths: {}", e.getMessage(), e);
+            results.put("error", e.getMessage());
+            return results;
         }
-        
-        return fixed;
     }
     
     /**
-     * Check if a specific path needs fixing
-     * @param path The path to check
-     * @param type The path type ("csv" or "log")
-     * @return True if the path needs fixing
+     * Fix paths for all servers
+     * @return Map of server IDs to results
      */
-    public static boolean needsFixing(String path, String type) {
-        if (path == null || path.isEmpty()) {
-            return true;
-        }
+    public Map<String, Map<String, Object>> fixAllPaths() {
+        Map<String, Map<String, Object>> results = new HashMap<>();
         
-        if ("csv".equalsIgnoreCase(type)) {
-            return !path.contains("/actual1/deathlogs") && 
-                   !path.contains("\\actual1\\deathlogs") &&
-                   !path.contains("/actual/deathlogs") && 
-                   !path.contains("\\actual\\deathlogs");
-        } else if ("log".equalsIgnoreCase(type)) {
-            return !path.contains("/Logs") && !path.contains("\\Logs");
+        try {
+            logger.info("Fixing paths for all servers");
+            
+            // Get all servers
+            List<GameServer> servers = repository.findAll();
+            
+            if (servers == null || servers.isEmpty()) {
+                logger.warn("No servers found");
+                return results;
+            }
+            
+            // Fix paths for each server
+            for (GameServer server : servers) {
+                try {
+                    Map<String, Object> serverResults = fixPaths(server);
+                    results.put(server.getId().toString(), serverResults);
+                } catch (Exception e) {
+                    logger.error("Error fixing paths for server {}: {}", 
+                        server.getName(), e.getMessage(), e);
+                    
+                    Map<String, Object> errorResults = new HashMap<>();
+                    errorResults.put("error", e.getMessage());
+                    results.put(server.getId().toString(), errorResults);
+                }
+            }
+            
+            logger.info("Fixed paths for {} servers", servers.size());
+            return results;
+        } catch (Exception e) {
+            logger.error("Error fixing paths for all servers: {}", e.getMessage(), e);
+            return results;
         }
-        
-        return false;
-    }
-    
-    /**
-     * Check if a server needs path fixing
-     * @param server The server to check
-     * @return True if the server needs path fixing
-     */
-    public static boolean serverNeedsFixing(GameServer server) {
-        if (server == null) {
-            return false;
-        }
-        
-        return needsFixing(server.getDeathlogsDirectory(), "csv") || 
-               needsFixing(server.getLogDirectory(), "log");
     }
 }

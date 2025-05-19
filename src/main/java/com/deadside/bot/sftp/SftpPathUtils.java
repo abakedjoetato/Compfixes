@@ -1,158 +1,217 @@
 package com.deadside.bot.sftp;
 
 import com.deadside.bot.db.models.GameServer;
-import com.deadside.bot.parsers.fixes.CsvParsingFix;
-import com.deadside.bot.parsers.fixes.LogParserFix;
-import com.deadside.bot.parsers.fixes.ParserPathRepairHook;
+import com.deadside.bot.parsers.fixes.ParserIntegrationHooks;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Utilities for SFTP path operations
- * This class provides utilities for enhancing SFTP path operations
+ * Utility methods for SFTP path operations
+ * This class provides utilities for working with SFTP paths
  */
 public class SftpPathUtils {
     private static final Logger logger = LoggerFactory.getLogger(SftpPathUtils.class);
     
     /**
-     * Get the deathlog CSV directory for a server with path resolution
+     * Find CSV path for a server
      * @param server The game server
-     * @param sftpConnector The SFTP connector
-     * @return The resolved path or the original if resolution failed
+     * @param connector The SFTP connector
+     * @return The resolved path, or null if not found
      */
-    public static String getResolvedDeathlogDirectory(GameServer server, SftpConnector sftpConnector) {
-        if (server == null) {
-            return null;
-        }
-        
+    public static String findCsvPath(GameServer server, SftpConnector connector) {
         try {
-            String originalPath = server.getDeathlogsDirectory();
+            logger.debug("Finding CSV path for server: {}", server.getName());
             
-            // Try to resolve the path using the hook
-            String resolvedPath = ParserPathRepairHook.getCsvPathHook(server, originalPath);
+            // Try registered path first
+            String registeredPath = ParserIntegrationHooks.getRegisteredCsvPath(server);
             
-            if (resolvedPath != null && !resolvedPath.equals(originalPath)) {
-                logger.debug("Resolved CSV path: {} -> {}", originalPath, resolvedPath);
-                return resolvedPath;
+            if (registeredPath != null && !registeredPath.isEmpty()) {
+                logger.debug("Using registered CSV path: {}", registeredPath);
+                return registeredPath;
             }
             
-            return originalPath;
+            // Try current path
+            String currentPath = server.getDeathlogsDirectory();
+            
+            if (currentPath != null && !currentPath.isEmpty()) {
+                // Save original path
+                String originalPath = server.getDeathlogsDirectory();
+                
+                // Test the path
+                List<String> files = connector.findDeathlogFiles(server);
+                
+                if (files != null && !files.isEmpty()) {
+                    logger.debug("Current CSV path is valid: {}", currentPath);
+                    return currentPath;
+                }
+            }
+            
+            // Try alternative paths
+            List<String> alternativePaths = ParserIntegrationHooks.getRecommendedCsvPaths(server);
+            
+            for (String path : alternativePaths) {
+                logger.debug("Trying alternative CSV path: {}", path);
+                
+                // Save original path
+                String originalPath = server.getDeathlogsDirectory();
+                
+                // Set path to try
+                server.setDeathlogsDirectory(path);
+                
+                // Test the path
+                List<String> files = connector.findDeathlogFiles(server);
+                
+                // Restore original path
+                server.setDeathlogsDirectory(originalPath);
+                
+                if (files != null && !files.isEmpty()) {
+                    logger.debug("Found valid alternative CSV path: {}", path);
+                    return path;
+                }
+            }
+            
+            logger.warn("Could not find valid CSV path for server: {}", server.getName());
+            return null;
         } catch (Exception e) {
-            logger.error("Error resolving deathlog directory for server {}: {}", 
-                server.getName(), e.getMessage(), e);
-            return server.getDeathlogsDirectory();
+            logger.error("Error finding CSV path: {}", e.getMessage(), e);
+            return null;
         }
     }
     
     /**
-     * Get the log directory for a server with path resolution
+     * Find log path for a server
      * @param server The game server
-     * @param sftpConnector The SFTP connector
-     * @return The resolved path or the original if resolution failed
+     * @param connector The SFTP connector
+     * @return The resolved path, or null if not found
      */
-    public static String getResolvedLogDirectory(GameServer server, SftpConnector sftpConnector) {
-        if (server == null) {
-            return null;
-        }
-        
+    public static String findLogPath(GameServer server, SftpConnector connector) {
         try {
-            String originalPath = server.getLogDirectory();
+            logger.debug("Finding log path for server: {}", server.getName());
             
-            // Try to resolve the path using the hook
-            String resolvedPath = ParserPathRepairHook.getLogPathHook(server, originalPath);
+            // Try registered path first
+            String registeredPath = ParserIntegrationHooks.getRegisteredLogPath(server);
             
-            if (resolvedPath != null && !resolvedPath.equals(originalPath)) {
-                logger.debug("Resolved log path: {} -> {}", originalPath, resolvedPath);
-                return resolvedPath;
+            if (registeredPath != null && !registeredPath.isEmpty()) {
+                logger.debug("Using registered log path: {}", registeredPath);
+                return registeredPath;
             }
             
-            return originalPath;
+            // Try current path
+            String currentPath = server.getLogDirectory();
+            
+            if (currentPath != null && !currentPath.isEmpty()) {
+                // Save original path
+                String originalPath = server.getLogDirectory();
+                
+                // Test the path
+                String logFile = connector.findLogFile(server);
+                
+                if (logFile != null && !logFile.isEmpty()) {
+                    logger.debug("Current log path is valid: {}", currentPath);
+                    return currentPath;
+                }
+            }
+            
+            // Try alternative paths
+            List<String> alternativePaths = ParserIntegrationHooks.getRecommendedLogPaths(server);
+            
+            for (String path : alternativePaths) {
+                logger.debug("Trying alternative log path: {}", path);
+                
+                // Save original path
+                String originalPath = server.getLogDirectory();
+                
+                // Set path to try
+                server.setLogDirectory(path);
+                
+                // Test the path
+                String logFile = connector.findLogFile(server);
+                
+                // Restore original path
+                server.setLogDirectory(originalPath);
+                
+                if (logFile != null && !logFile.isEmpty()) {
+                    logger.debug("Found valid alternative log path: {}", path);
+                    return path;
+                }
+            }
+            
+            logger.warn("Could not find valid log path for server: {}", server.getName());
+            return null;
         } catch (Exception e) {
-            logger.error("Error resolving log directory for server {}: {}", 
-                server.getName(), e.getMessage(), e);
-            return server.getLogDirectory();
+            logger.error("Error finding log path: {}", e.getMessage(), e);
+            return null;
         }
     }
     
     /**
-     * Find deathlog files for a server with path resolution
+     * Generate alternative CSV paths for a server
      * @param server The game server
-     * @param sftpConnector The SFTP connector
-     * @return List of deathlog files or empty list if none found
+     * @return List of alternative paths
      */
-    public static List<String> findDeathlogFilesWithResolution(GameServer server, SftpConnector sftpConnector) {
-        if (server == null || sftpConnector == null) {
-            return java.util.Collections.emptyList();
-        }
+    public static List<String> generateAlternativeCsvPaths(GameServer server) {
+        List<String> paths = new ArrayList<>();
         
         try {
-            // Resolve the path first
-            String resolvedPath = getResolvedDeathlogDirectory(server, sftpConnector);
-            
-            // Try to find files using the resolved path
-            List<String> files = sftpConnector.findDeathlogFiles(server);
-            
-            if (files != null && !files.isEmpty()) {
-                // Record the successful path
-                ParserPathRepairHook.recordSuccessfulCsvPath(server, resolvedPath);
-                return files;
+            // Get server properties
+            String host = server.getSftpHost();
+            if (host == null || host.isEmpty()) {
+                host = server.getHost();
             }
             
-            // If no files found, try to find them directly using the CsvParsingFix
-            String fixedPath = CsvParsingFix.resolveServerCsvPath(server, sftpConnector);
-            if (fixedPath != null && !fixedPath.equals(resolvedPath)) {
-                // Try again with the fixed path
-                server.setDeathlogsDirectory(fixedPath);
-                return sftpConnector.findDeathlogFiles(server);
+            String serverName = server.getServerId();
+            if (serverName == null || serverName.isEmpty()) {
+                serverName = server.getName().replaceAll("\\s+", "_");
             }
             
-            return files;
+            // Add alternative paths
+            paths.add(host + "_" + serverName + "/actual1/deathlogs");
+            paths.add(host + "_" + serverName + "/actual/deathlogs");
+            paths.add(host + "/" + serverName + "/actual1/deathlogs");
+            paths.add(host + "/" + serverName + "/actual/deathlogs");
+            paths.add(serverName + "/actual1/deathlogs");
+            paths.add(serverName + "/actual/deathlogs");
         } catch (Exception e) {
-            logger.error("Error finding deathlog files with resolution for server {}: {}", 
-                server.getName(), e.getMessage(), e);
-            return java.util.Collections.emptyList();
+            logger.error("Error generating alternative CSV paths: {}", e.getMessage(), e);
         }
+        
+        return paths;
     }
     
     /**
-     * Find log file for a server with path resolution
+     * Generate alternative log paths for a server
      * @param server The game server
-     * @param sftpConnector The SFTP connector
-     * @return The log file path or null if not found
+     * @return List of alternative paths
      */
-    public static String findLogFileWithResolution(GameServer server, SftpConnector sftpConnector) {
-        if (server == null || sftpConnector == null) {
-            return null;
-        }
+    public static List<String> generateAlternativeLogPaths(GameServer server) {
+        List<String> paths = new ArrayList<>();
         
         try {
-            // Resolve the path first
-            String resolvedPath = getResolvedLogDirectory(server, sftpConnector);
-            
-            // Try to find the log file using the resolved path
-            String logFile = sftpConnector.findLogFile(server);
-            
-            if (logFile != null && !logFile.isEmpty()) {
-                // Record the successful path
-                ParserPathRepairHook.recordSuccessfulLogPath(server, resolvedPath);
-                return logFile;
+            // Get server properties
+            String host = server.getSftpHost();
+            if (host == null || host.isEmpty()) {
+                host = server.getHost();
             }
             
-            // If no log file found, try to find it directly using the LogParserFix
-            String fixedPath = LogParserFix.resolveServerLogPath(server, sftpConnector);
-            if (fixedPath != null && !fixedPath.equals(resolvedPath)) {
-                // Try again with the fixed path
-                server.setLogDirectory(fixedPath);
-                return sftpConnector.findLogFile(server);
+            String serverName = server.getServerId();
+            if (serverName == null || serverName.isEmpty()) {
+                serverName = server.getName().replaceAll("\\s+", "_");
             }
             
-            return logFile;
+            // Add alternative paths
+            paths.add(host + "_" + serverName + "/Logs");
+            paths.add(host + "_" + serverName + "/Deadside/Logs");
+            paths.add(host + "/" + serverName + "/Logs");
+            paths.add(host + "/" + serverName + "/Deadside/Logs");
+            paths.add(serverName + "/Logs");
+            paths.add(serverName + "/Deadside/Logs");
         } catch (Exception e) {
-            logger.error("Error finding log file with resolution for server {}: {}", 
-                server.getName(), e.getMessage(), e);
-            return null;
+            logger.error("Error generating alternative log paths: {}", e.getMessage(), e);
         }
+        
+        return paths;
     }
 }
