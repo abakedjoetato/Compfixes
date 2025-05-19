@@ -37,7 +37,7 @@ public class ParserFixIntegration {
      */
     public ParserFixIntegration(JDA jda, 
                                GameServerRepository gameServerRepository,
-                               org.bson.codecs.pojo.annotations.BsonProperty("playerRepository") Object playerRepository,
+                               Object playerRepository,
                                SftpConnector sftpConnector,
                                DeadsideCsvParser csvParser,
                                DeadsideLogParser logParser) {
