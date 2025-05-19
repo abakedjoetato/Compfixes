@@ -60,12 +60,13 @@ public class PathSystemIntegration {
             }
             
             // Initialize the registry
-            boolean success = DeadsideParserPathRegistry.getInstance().initialize(
+            DeadsideParserPathRegistry.getInstance().initialize(
                 gameServerRepository, sftpConnector, csvParser, logParser);
+            boolean success = DeadsideParserPathRegistry.getInstance().isInitialized();
             
             // Create integration components
             BotParserIntegration integration = new BotParserIntegration(
-                bot, csvParser, logParser, sftpConnector);
+                bot.getJda(), csvParser, logParser, sftpConnector);
             integration.initialize();
             
             // Path monitoring is implemented elsewhere

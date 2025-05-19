@@ -83,6 +83,22 @@ public class ParserPathTracker {
     }
     
     /**
+     * Get a successful path for a server and category
+     * @param server The game server
+     * @param category The path category
+     * @return The most recent successful path, or null if none found
+     */
+    public String getSuccessfulPath(GameServer server, String category) {
+        List<String> paths = getRecommendedPaths(server, category);
+        if (paths == null || paths.isEmpty()) {
+            return null;
+        }
+        
+        // Return the most recently added path
+        return paths.get(paths.size() - 1);
+    }
+    
+    /**
      * Get recommended paths for a server and category
      * @param server The game server
      * @param category The path category

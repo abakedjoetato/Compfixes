@@ -60,7 +60,7 @@ public class CsvParsingFix {
     }
     
     /**
-     * Process a death log line with fixed logic
+     * Process a death log line
      * @param server The game server
      * @param line The log line
      * @param playerRepository The player repository
@@ -68,23 +68,31 @@ public class CsvParsingFix {
      */
     public static boolean processDeathLogLineFixed(GameServer server, String line, PlayerRepository playerRepository) {
         try {
-            if (line == null || line.isEmpty()) {
+            if (line == null || line.trim().isEmpty()) {
                 return false;
             }
             
-            // Parse the line
+            // Split by comma
             String[] parts = line.split(",");
+            
+            // Check if we have enough fields
             if (parts.length < 3) {
-                logger.warn("Invalid death log line format: {}", line);
+                logger.warn("Invalid death log line (not enough fields): {}", line);
                 return false;
             }
             
-            // Extract player information
+            // Extract data
             String killer = parts[0].trim();
             String victim = parts[1].trim();
-            String weapon = parts.length > 2 ? parts[2].trim() : "Unknown";
+            String weapon = parts[2].trim();
             
-            // Update stats in the database
+            // Skip invalid records
+            if (killer.isEmpty() || victim.isEmpty()) {
+                logger.warn("Invalid death log line (empty killer or victim): {}", line);
+                return false;
+            }
+            
+            // Update player stats
             updatePlayerStats(server, killer, victim, weapon, playerRepository);
             
             return true;
@@ -95,12 +103,7 @@ public class CsvParsingFix {
     }
     
     /**
-     * Update player statistics
-     * @param server The game server
-     * @param killer The killer name
-     * @param victim The victim name
-     * @param weapon The weapon used
-     * @param playerRepository The player repository
+     * Update player stats from a death log entry
      */
     private static void updatePlayerStats(GameServer server, String killer, String victim, 
                                          String weapon, PlayerRepository playerRepository) {
@@ -133,22 +136,44 @@ public class CsvParsingFix {
             killerPlayer.setKills(killerPlayer.getKills() + 1);
             victimPlayer.setDeaths(victimPlayer.getDeaths() + 1);
             
-            // Save to database
+            // Update weapon stats
+            Map<String, Integer> killerWeapons = killerPlayer.getWeaponKills();
+            if (killerWeapons == null) {
+                killerWeapons = new HashMap<>();
+                killerPlayer.setWeaponKills(killerWeapons);
+            }
+            
+            int weaponKills = killerWeapons.getOrDefault(weapon, 0) + 1;
+            killerWeapons.put(weapon, weaponKills);
+            
+            if (weaponKills > killerPlayer.getMostUsedWeaponKills()) {
+                killerPlayer.setMostUsedWeapon(weapon);
+                killerPlayer.setMostUsedWeaponKills(weaponKills);
+            }
+            
+            // Update K/D ratio
+            float kdRatio = 0.0f;
+            if (killerPlayer.getDeaths() > 0) {
+                kdRatio = (float) killerPlayer.getKills() / killerPlayer.getDeaths();
+            } else {
+                kdRatio = killerPlayer.getKills();
+            }
+            killerPlayer.setKdRatio(kdRatio);
+            
+            // Save players
             playerRepository.save(killerPlayer);
             playerRepository.save(victimPlayer);
-            
-            logger.debug("Updated stats for {} killed {} with {}", killer, victim, weapon);
         } catch (Exception e) {
             logger.error("Error updating player stats: {}", e.getMessage(), e);
         }
     }
     
     /**
-     * Validate and synchronize player statistics
+     * Validate and synchronize stats for all players
      * @param playerRepository The player repository
-     * @return True if successful
+     * @return Number of corrections made
      */
-    public static boolean validateAndSyncStats(PlayerRepository playerRepository) {
+    public static int validateAndSyncStats(PlayerRepository playerRepository) {
         try {
             logger.info("Validating and synchronizing player statistics");
             
@@ -168,21 +193,20 @@ public class CsvParsingFix {
                     fixedCount++;
                 }
                 
-                // Update KD ratio
-                float kdRatio = player.getDeaths() > 0 ? 
-                    (float) player.getKills() / player.getDeaths() : player.getKills();
-                player.setKdRatio(kdRatio);
+                if (player.getSuicides() < 0) {
+                    player.setSuicides(0);
+                    fixedCount++;
+                }
                 
-                // Save changes
+                // Recalculate metrics if needed
                 playerRepository.save(player);
             }
             
-            logger.info("Validated player statistics: {} players, {} fixes", players.size(), fixedCount);
-            
-            return true;
+            logger.info("Fixed stats for {} players", fixedCount);
+            return fixedCount;
         } catch (Exception e) {
-            logger.error("Error validating player statistics: {}", e.getMessage(), e);
-            return false;
+            logger.error("Error validating and synchronizing player statistics: {}", e.getMessage(), e);
+            return 0;
         }
     }
 }

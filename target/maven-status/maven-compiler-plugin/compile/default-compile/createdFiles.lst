@@ -1,0 +1,6 @@
+com/deadside/bot/parsers/fixes/ParserPathIntegrationManager.class
+com/deadside/bot/sftp/SftpConnector.class
+com/deadside/bot/sftp/SftpConnector$SftpConnection.class
+com/deadside/bot/db/models/GameServer.class
+com/deadside/bot/db/repositories/GameServerRepository.class
+com/deadside/bot/parsers/fixes/PathResolutionManager.class

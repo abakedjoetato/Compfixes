@@ -445,15 +445,17 @@ public class GameServerRepository {
     }
     
     /**
-     * Find all game servers for a Discord guild
+     * Find all game servers for a Discord guild with enhanced logging
      * @param guildId The guild ID
      * @return List of all servers for the given guild
      */
-    public List<GameServer> findAllByGuildId(long guildId) {
+    private List<GameServer> findAllServersByGuildId(long guildId) {
         try {
             List<GameServer> servers = new ArrayList<>();
             Bson filter = Filters.eq("guildId", guildId);
             getCollection().find(filter).into(servers);
+            
+            logger.info("Found {} servers for guild ID: {}", servers.size(), guildId);
             return servers;
         } catch (Exception e) {
             logger.error("Error finding all game servers for guild: {}", guildId, e);

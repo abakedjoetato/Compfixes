@@ -292,4 +292,31 @@ public class ParserIntegrationHooks {
         logger.debug("Hooks registered: {}", registered);
         return registered;
     }
+    
+    // Static flag to track hook registration status
+    private static boolean hooksRegistered = false;
+    
+    /**
+     * Register hooks with JDA and parsers
+     * @param jda The JDA instance
+     * @param csvParser The CSV parser
+     * @param logParser The log parser
+     * @param sftpConnector The SFTP connector
+     */
+    public static void registerHooks(
+            net.dv8tion.jda.api.JDA jda, 
+            com.deadside.bot.parsers.DeadsideCsvParser csvParser,
+            com.deadside.bot.parsers.DeadsideLogParser logParser,
+            com.deadside.bot.sftp.SftpConnector sftpConnector) {
+            
+        logger.info("Registering parser integration hooks");
+        
+        // Register event listeners if needed
+        jda.addEventListener(new ParserEventListener(csvParser, logParser));
+        
+        // Set hooks as registered
+        hooksRegistered = true;
+        
+        logger.info("Parser integration hooks registered successfully");
+    }
 }

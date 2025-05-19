@@ -51,13 +51,18 @@ public class DeadsidePathFix {
     private static void registerPathFixCommand(Bot bot) {
         try {
             // Create the command
-            PathFixCommand command = new PathFixCommand(bot);
+            PathFixCommand command = new PathFixCommand(
+                bot.getGameServerRepository(), bot.getSftpConnector());
             
             // Register the command with JDA
             bot.getJda().addEventListener(command);
             
+            // Create a command instance and use its createCommand method
+            PathFixCommand pathFixCommand = new PathFixCommand(
+                bot.getGameServerRepository(), bot.getSftpConnector());
+                
             // Update commands
-            bot.getJda().updateCommands().addCommands(PathFixCommand.createCommand()).queue();
+            bot.getJda().updateCommands().addCommands(pathFixCommand.createCommand()).queue();
             
             logger.info("PathFixCommand registered successfully");
         } catch (Exception e) {

@@ -76,8 +76,16 @@ public class DeadsideBot {
             // Initialize the premium manager
             premiumManager = new PremiumManager();
             
-            // Initialize the command manager
-            commandManager = new CommandManager();
+            // Initialize repositories first
+            GameServerRepository gameServerRepository = new GameServerRepository();
+            PlayerRepository playerRepository = new PlayerRepository();
+            
+            // Initialize SFTP connector
+            SftpConnector sftpConnector = new SftpConnector();
+            
+            // Create parsers
+            DeadsideCsvParser csvParser = new DeadsideCsvParser(null, sftpConnector, playerRepository, gameServerRepository);
+            DeadsideLogParser logParser = new DeadsideLogParser(null, gameServerRepository, sftpConnector);
             
             // Build the JDA instance with necessary intents
             jda = JDABuilder.createDefault(token)
@@ -104,13 +112,21 @@ public class DeadsideBot {
                             new ModalListener()
                     )
                     .build();
+                    
+            // Create new parser instances with valid JDA reference
+            DeadsideCsvParser csvParserWithJda = new DeadsideCsvParser(jda, sftpConnector, playerRepository, gameServerRepository);
+            DeadsideLogParser logParserWithJda = new DeadsideLogParser(jda, gameServerRepository, sftpConnector);
+            
+            // Initialize command manager with all required dependencies
+            commandManager = new CommandManager(jda, gameServerRepository, playerRepository, sftpConnector, csvParserWithJda, logParserWithJda);
             
             // Wait for JDA to be ready
             jda.awaitReady();
             logger.info("JDA initialized and connected to Discord gateway");
 
-            // Register slash commands
-            commandManager.registerCommands(jda);
+            // Register slash commands (using no-arg version)
+            logger.info("Registering commands with Discord API");
+            commandManager.registerCommands();
             
             // Start schedulers
             startSchedulers();

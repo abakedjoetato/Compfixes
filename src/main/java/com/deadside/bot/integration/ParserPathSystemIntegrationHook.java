@@ -45,6 +45,29 @@ public class ParserPathSystemIntegrationHook {
     }
     
     /**
+     * Static initializer to create and initialize from a Bot instance
+     * @param bot The Bot instance
+     * @return Success status
+     */
+    public static boolean initialize(com.deadside.bot.Bot bot) {
+        if (bot == null) {
+            logger.error("Cannot initialize parser path system with null Bot instance");
+            return false;
+        }
+        
+        // Create an instance and initialize
+        ParserPathSystemIntegrationHook hook = new ParserPathSystemIntegrationHook(
+            bot.getGameServerRepository(),
+            bot.getSftpConnector(),
+            bot.getCsvParser(),
+            bot.getLogParser()
+        );
+        
+        hook.initialize();
+        return true;
+    }
+    
+    /**
      * Initialize the parser path system integration
      */
     public void initialize() {

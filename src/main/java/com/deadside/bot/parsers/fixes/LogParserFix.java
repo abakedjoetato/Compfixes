@@ -23,12 +23,14 @@ public class LogParserFix {
         private final int linesProcessed;
         private final int deathsProcessed;
         private final int errorsEncountered;
+        private boolean rotationDetected;
         
         public LogProcessingSummary(boolean successful, int linesProcessed, int deathsProcessed, int errorsEncountered) {
             this.successful = successful;
             this.linesProcessed = linesProcessed;
             this.deathsProcessed = deathsProcessed;
             this.errorsEncountered = errorsEncountered;
+            this.rotationDetected = false;
         }
         
         public boolean isSuccessful() {
@@ -37,6 +39,38 @@ public class LogParserFix {
         
         public int getLinesProcessed() {
             return linesProcessed;
+        }
+        
+        /**
+         * Get the number of new lines processed
+         * @return Number of new lines
+         */
+        public int getNewLines() {
+            return linesProcessed;
+        }
+        
+        /**
+         * Get the total number of events processed
+         * @return Total events
+         */
+        public int getTotalEvents() {
+            return deathsProcessed;
+        }
+        
+        /**
+         * Check if log rotation was detected
+         * @return True if rotation detected
+         */
+        public boolean isRotationDetected() {
+            return rotationDetected;
+        }
+        
+        /**
+         * Set the rotation detected flag
+         * @param rotationDetected Whether rotation was detected
+         */
+        public void setRotationDetected(boolean rotationDetected) {
+            this.rotationDetected = rotationDetected;
         }
         
         public int getDeathsProcessed() {

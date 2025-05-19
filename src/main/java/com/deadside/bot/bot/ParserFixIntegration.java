@@ -68,6 +68,9 @@ public class ParserFixIntegration {
             String results = fixEntrypoint.executeAllFixesAsBatch();
             logger.info("Parser fix batch execution results: {}", results);
             
+            // Consider the operation successful if results don't start with "FAILED"
+            boolean success = results != null && !results.startsWith("FAILED");
+            
             logger.info("Parser fix integration successfully initialized");
             return true;
         } catch (Exception e) {

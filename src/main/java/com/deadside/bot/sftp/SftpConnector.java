@@ -104,13 +104,26 @@ public class SftpConnector {
     /**
      * SFTP connection wrapper
      */
-    protected static class SftpConnection {
+    protected static class SftpConnection implements AutoCloseable {
         Session session;
         ChannelSftp channel;
         
         public SftpConnection(Session session, ChannelSftp channel) {
             this.session = session;
             this.channel = channel;
+        }
+        
+        @Override
+        public void close() throws Exception {
+            try {
+                if (channel != null && channel.isConnected()) {
+                    channel.disconnect();
+                }
+            } finally {
+                if (session != null && session.isConnected()) {
+                    session.disconnect();
+                }
+            }
         }
         
         public SftpConnection(GameServer server) throws JSchException {
@@ -267,12 +280,12 @@ public class SftpConnector {
     }
     
     /**
-     * Connect to an SFTP server
+     * Connect to an SFTP server using the improved connection method
      * @param server The server config
      * @return The SFTP channel and session
      * @throws JSchException If connection fails
      */
-    private SftpConnection connect(GameServer server) throws JSchException {
+    private SftpConnection connectImproved(GameServer server) throws JSchException {
         JSch jsch = new JSch();
         Session session = null;
         ChannelSftp channel = null;
@@ -600,7 +613,7 @@ public class SftpConnector {
      * @param server The server config
      * @return List of CSV file paths
      */
-    public List<String> findDeathlogFiles(GameServer server) throws Exception {
+    public List<String> findDeathlogFilesV2(GameServer server) throws Exception {
         // Server validity check
         if (server == null) {
             logger.info("Cannot find deathlog files: null server reference");
@@ -791,7 +804,7 @@ public class SftpConnector {
      * @param filePath Path to the file
      * @return The file content as a string
      */
-    public String readFile(GameServer server, String filePath) throws Exception {
+    public String readFileV2(GameServer server, String filePath) throws Exception {
         // Server validity check
         if (server == null) {
             logger.info("Cannot read file: null server reference");
@@ -975,36 +988,8 @@ public class SftpConnector {
         return readLinesAfter(server, filePath, afterLine);
     }
     
-    /**
-     * Holder class for SFTP session and channel
-     */
-    private static class SftpConnection implements AutoCloseable {
-        private final Session session;
-        private final ChannelSftp channel;
-        
-        public SftpConnection(Session session, ChannelSftp channel) {
-            this.session = session;
-            this.channel = channel;
-        }
-        
-        public Session getSession() {
-            return session;
-        }
-        
-        public ChannelSftp getChannel() {
-            return channel;
-        }
-        
-        @Override
-        public void close() {
-            if (channel != null && channel.isConnected()) {
-                channel.disconnect();
-            }
-            if (session != null && session.isConnected()) {
-                session.disconnect();
-            }
-        }
-    }
+    // Using the protected SftpConnection class defined earlier in this file
+    // Removed duplicate definition to fix compilation errors
     
     /**
      * Check if a file exists on the remote server

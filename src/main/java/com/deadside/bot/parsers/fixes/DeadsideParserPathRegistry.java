@@ -91,6 +91,26 @@ public class DeadsideParserPathRegistry {
     }
     
     /**
+     * Register a path for a GameServer
+     * @param server The game server
+     * @param pathType The path type (csv, log)
+     * @param path The path
+     */
+    public void registerPath(com.deadside.bot.db.models.GameServer server, String pathType, String path) {
+        if (server == null) {
+            logger.warn("Cannot register path for null server");
+            return;
+        }
+        
+        String serverId = server.getServerId();
+        if (serverId == null || serverId.isEmpty()) {
+            serverId = String.valueOf(server.getId());
+        }
+        
+        registerPath(serverId, pathType, path);
+    }
+
+    /**
      * Register a path
      * @param serverId The server ID
      * @param pathType The path type (csv, log)
@@ -109,6 +129,26 @@ public class DeadsideParserPathRegistry {
         serverRegistry.put(pathType, path);
         
         logger.debug("Registered path for server {}: {}={}", serverId, pathType, path);
+    }
+    
+    /**
+     * Get a registered path for a GameServer
+     * @param server The game server
+     * @param pathType The path type (csv, log)
+     * @return The registered path, or null if not found
+     */
+    public String getPath(com.deadside.bot.db.models.GameServer server, String pathType) {
+        if (server == null) {
+            logger.warn("Cannot get path for null server");
+            return null;
+        }
+        
+        String serverId = server.getServerId();
+        if (serverId == null || serverId.isEmpty()) {
+            serverId = String.valueOf(server.getId());
+        }
+        
+        return getPath(serverId, pathType);
     }
     
     /**
