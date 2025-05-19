@@ -104,7 +104,9 @@ public class DeadsideCsvParser {
             for (String csvFile : csvFiles) {
                 if (csvFile.endsWith(".csv")) {
                     try {
-                        String filePath = server.getDeathlogsDirectory() + "/" + csvFile;
+                        // Use path resolution hook to ensure valid path
+                        String deathlogsDir = ParserPathHooks.processCsvPath(server, server.getDeathlogsDirectory());
+                        String filePath = deathlogsDir + "/" + csvFile;
                         logger.info("Processing CSV file: {} for server: {} (historical mode: yes)", 
                                 filePath, server.getName());
                         

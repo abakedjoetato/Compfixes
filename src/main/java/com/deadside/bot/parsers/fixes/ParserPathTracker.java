@@ -1,152 +1,92 @@
 package com.deadside.bot.parsers.fixes;
 
-import com.deadside.bot.db.models.GameServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Tracker for parser path resolution issues and successes
- * This class helps diagnose file path issues by maintaining a record of successful
- * and failed path resolutions, which aids in debugging and self-healing.
+ * Path tracker for parser operations
+ * Maintains a cache of successful path resolutions
  */
 public class ParserPathTracker {
     private static final Logger logger = LoggerFactory.getLogger(ParserPathTracker.class);
-    private static final ParserPathTracker INSTANCE = new ParserPathTracker();
     
-    // Track successful paths for each server by category
-    private final Map<String, Map<String, String>> successfulPaths = new ConcurrentHashMap<>();
-    
-    // Track failed paths for each server by category
-    private final Map<String, Map<String, String>> failedPaths = new ConcurrentHashMap<>();
-    
-    // Track path resolution attempts for diagnostics
-    private final Map<String, Integer> resolutionAttempts = new ConcurrentHashMap<>();
-    
-    // Categories
-    public static final String CATEGORY_CSV = "csv";
-    public static final String CATEGORY_LOG = "log";
-    
-    private ParserPathTracker() {
-        // Private constructor for singleton
-    }
+    // Cache maps for CSV and log file paths
+    private static final Map<String, String> csvPathCache = new ConcurrentHashMap<>();
+    private static final Map<String, String> logPathCache = new ConcurrentHashMap<>();
     
     /**
-     * Get the singleton instance
+     * Track a successful CSV path resolution
+     * @param serverId The unique server identifier
+     * @param path The resolved path
      */
-    public static ParserPathTracker getInstance() {
-        return INSTANCE;
-    }
-    
-    /**
-     * Record a successful path resolution
-     * @param server The game server
-     * @param category Path category (csv or log)
-     * @param path The successful path
-     */
-    public void recordSuccessfulPath(GameServer server, String category, String path) {
-        String serverKey = getServerKey(server);
-        
-        // Initialize maps if needed
-        successfulPaths.computeIfAbsent(serverKey, k -> new HashMap<>());
-        
-        // Record successful path
-        successfulPaths.get(serverKey).put(category, path);
-        
-        // Update attempt counter
-        incrementResolutionAttempts(serverKey, category, true);
-        
-        logger.debug("Recorded successful {} path for server {}: {}", 
-            category, server.getName(), path);
-    }
-    
-    /**
-     * Record a failed path resolution
-     * @param server The game server
-     * @param category Path category (csv or log)
-     * @param path The failed path
-     */
-    public void recordFailedPath(GameServer server, String category, String path) {
-        String serverKey = getServerKey(server);
-        
-        // Initialize maps if needed
-        failedPaths.computeIfAbsent(serverKey, k -> new HashMap<>());
-        
-        // Record failed path
-        failedPaths.get(serverKey).put(category, path);
-        
-        // Update attempt counter
-        incrementResolutionAttempts(serverKey, category, false);
-        
-        logger.debug("Recorded failed {} path for server {}: {}", 
-            category, server.getName(), path);
-    }
-    
-    /**
-     * Get the most recent successful path for a server/category
-     * @param server The game server
-     * @param category Path category (csv or log)
-     * @return The most recent successful path, or null if none
-     */
-    public String getSuccessfulPath(GameServer server, String category) {
-        String serverKey = getServerKey(server);
-        
-        if (successfulPaths.containsKey(serverKey) && 
-            successfulPaths.get(serverKey).containsKey(category)) {
-            return successfulPaths.get(serverKey).get(category);
+    public static void trackCsvPath(String serverId, String path) {
+        if (serverId != null && path != null) {
+            csvPathCache.put(serverId, path);
+            logger.debug("Tracked CSV path for server {}: {}", serverId, path);
         }
-        
-        return null;
     }
     
     /**
-     * Check if a server has previously succeeded with a path for a category
-     * @param server The game server
-     * @param category Path category (csv or log)
-     * @return True if a successful path exists
+     * Track a successful log path resolution
+     * @param serverId The unique server identifier
+     * @param path The resolved path
      */
-    public boolean hasSuccessfulPath(GameServer server, String category) {
-        return getSuccessfulPath(server, category) != null;
+    public static void trackLogPath(String serverId, String path) {
+        if (serverId != null && path != null) {
+            logPathCache.put(serverId, path);
+            logger.debug("Tracked log path for server {}: {}", serverId, path);
+        }
     }
     
     /**
-     * Get a unique key for a server
+     * Get a tracked CSV path
+     * @param serverId The unique server identifier
+     * @return The tracked path, or null if not found
      */
-    private String getServerKey(GameServer server) {
-        return server.getGuildId() + ":" + server.getName();
+    public static String getCsvPath(String serverId) {
+        return serverId != null ? csvPathCache.get(serverId) : null;
     }
     
     /**
-     * Increment resolution attempts counter
+     * Get a tracked log path
+     * @param serverId The unique server identifier
+     * @return The tracked path, or null if not found
      */
-    private void incrementResolutionAttempts(String serverKey, String category, boolean success) {
-        String key = serverKey + ":" + category + ":" + (success ? "success" : "failure");
-        resolutionAttempts.compute(key, (k, v) -> (v == null) ? 1 : v + 1);
+    public static String getLogPath(String serverId) {
+        return serverId != null ? logPathCache.get(serverId) : null;
     }
     
     /**
-     * Get path resolution stats for diagnostics
+     * Clear the path cache for testing
      */
-    public Map<String, Object> getPathResolutionStats() {
-        Map<String, Object> stats = new HashMap<>();
-        stats.put("successfulPathCount", successfulPaths.size());
-        stats.put("failedPathCount", failedPaths.size());
-        stats.put("resolutionAttempts", new HashMap<>(resolutionAttempts));
-        
-        return stats;
+    public static void clearCache() {
+        csvPathCache.clear();
+        logPathCache.clear();
+        logger.info("Path tracker cache cleared");
     }
     
     /**
-     * Clear all tracking data
-     * Use this when you want to reset the tracker state
+     * Clear path cache for a specific server
+     * @param serverId The unique server identifier
      */
-    public void clearAll() {
-        successfulPaths.clear();
-        failedPaths.clear();
-        resolutionAttempts.clear();
-        logger.info("Path tracker data cleared");
+    public static void clearServerCache(String serverId) {
+        if (serverId != null) {
+            csvPathCache.remove(serverId);
+            logPathCache.remove(serverId);
+            logger.info("Path tracker cache cleared for server {}", serverId);
+        }
+    }
+    
+    /**
+     * Get a unique server identifier
+     * @param guildId Guild ID
+     * @param serverId Server ID
+     * @return Unique identifier
+     */
+    public static String getUniqueId(long guildId, String serverId) {
+        return guildId + ":" + serverId;
     }
 }

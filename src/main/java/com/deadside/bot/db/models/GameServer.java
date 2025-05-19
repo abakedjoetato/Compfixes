@@ -3,6 +3,8 @@ package com.deadside.bot.db.models;
 import org.bson.codecs.pojo.annotations.BsonId;
 import org.bson.types.ObjectId;
 
+import com.deadside.bot.parsers.fixes.DirectPathResolutionFix;
+
 /**
  * Database model for a Deadside game server
  * This is a core component of the data isolation system
@@ -434,7 +436,8 @@ public class GameServer {
     public String getLogDirectory() {
         // If we have a value that appears to follow the correct pattern, use it
         if (logDirectory != null && !logDirectory.isEmpty() && 
-            (logDirectory.contains("/Logs") || logDirectory.contains("\\Logs"))) {
+            (logDirectory.contains("/Logs") || logDirectory.contains("\\Logs") ||
+             logDirectory.contains("/Deadside/Logs") || logDirectory.contains("\\Deadside\\Logs"))) {
             return logDirectory;
         }
         
@@ -472,7 +475,8 @@ public class GameServer {
      */
     public String getDeathlogsDirectory() {
         if (deathlogsDirectory != null && !deathlogsDirectory.isEmpty() && 
-            (deathlogsDirectory.contains("actual1/deathlogs") || deathlogsDirectory.contains("actual1\\deathlogs"))) {
+            (deathlogsDirectory.contains("actual1/deathlogs") || deathlogsDirectory.contains("actual1\\deathlogs") ||
+             deathlogsDirectory.contains("actual/deathlogs") || deathlogsDirectory.contains("actual\\deathlogs"))) {
             return deathlogsDirectory;
         }
         

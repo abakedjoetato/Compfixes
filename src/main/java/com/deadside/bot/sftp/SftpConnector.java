@@ -300,6 +300,17 @@ public class SftpConnector {
      * @return List of CSV file paths
      */
     public List<String> findDeathlogFiles(GameServer server) throws Exception {
+        // Apply path resolution fix for CSV files
+        String originalPath = server.getDeathlogsDirectory();
+        String resolvedPath = PathResolutionFix.resolveCsvPath(server, this);
+        
+        if (resolvedPath != null && !resolvedPath.equals(originalPath)) {
+            // Update the server with the resolved path
+            server.setDeathlogsDirectory(resolvedPath);
+            logger.debug("Using resolved CSV path: {} (original: {})", 
+                resolvedPath, originalPath);
+        }
+        
         // Server validity check
         if (server == null) {
             logger.info("Cannot find deathlog files: null server reference");
@@ -773,6 +784,59 @@ public class SftpConnector {
     }
     
     /**
+     * Test if a connection to a specific path can be established
+     * This method is used for path validation and resolution
+     * @param server The game server to connect to
+     * @param path The path to test
+     * @return True if the path exists and is accessible
+     */
+    public boolean testConnection(GameServer server, String path) throws Exception {
+        Session session = null;
+        ChannelSftp channelSftp = null;
+        try {
+            // Verify server has proper isolation fields
+            if (server.getGuildId() <= 0) {
+                logger.warn("Attempted to test connection without proper guild isolation: {} in server {}", 
+                    path, server.getName());
+                return false;
+            }
+            
+            session = createSession(server);
+            if (session == null) {
+                return false;
+            }
+            
+            channelSftp = (ChannelSftp) session.openChannel("sftp");
+            channelSftp.connect(timeout);
+            
+            try {
+                // Try to access the directory
+                channelSftp.ls(path);
+                logger.debug("Successfully tested connection to path: {} for server {}", 
+                    path, server.getName());
+                
+                // Path exists and is accessible
+                return true;
+            } catch (Exception e) {
+                logger.debug("Path does not exist or is not accessible: {} for server {}: {}", 
+                    path, server.getName(), e.getMessage());
+                return false;
+            }
+        } catch (Exception e) {
+            logger.warn("Error testing connection to path: {} for server {}: {}", 
+                path, server.getName(), e.getMessage());
+            return false;
+        } finally {
+            if (channelSftp != null && channelSftp.isConnected()) {
+                channelSftp.disconnect();
+            }
+            if (session != null && session.isConnected()) {
+                session.disconnect();
+            }
+        }
+    }
+    
+    /**
      * Read a deathlog CSV file
      * @param server The server config
      * @param filename Name of the CSV file (including subdirectory path)
@@ -1075,6 +1139,14 @@ public class SftpConnector {
      * @param server The game server configuration with proper isolation metadata
      * @param remotePath The path to the file on the remote server
      * @return True if the file exists, false otherwise
+     */
+
+
+    /**
+     * Check if a file exists on the SFTP server
+     * @param server The server configuration
+     * @param remotePath Path to check
+     * @return True if the file exists
      */
     public boolean fileExists(GameServer server, String remotePath) {
         Session session = null;

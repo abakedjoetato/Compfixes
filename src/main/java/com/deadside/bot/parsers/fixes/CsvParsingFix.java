@@ -1,183 +1,209 @@
 package com.deadside.bot.parsers.fixes;
 
 import com.deadside.bot.db.models.GameServer;
-import com.deadside.bot.db.models.Player;
-import com.deadside.bot.db.repositories.PlayerRepository;
+import com.deadside.bot.db.repositories.GameServerRepository;
+import com.deadside.bot.sftp.SftpConnector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.List;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Fixes and utilities for the CSV parser to ensure proper data handling
- * and isolation between different Discord servers
+ * Fix for CSV parsing issues related to path resolution
  */
 public class CsvParsingFix {
     private static final Logger logger = LoggerFactory.getLogger(CsvParsingFix.class);
     
+    // Cache of successful paths
+    private static final Map<String, String> successfulPaths = new ConcurrentHashMap<>();
+    
+    // Alternative paths to try
+    private static final List<String> alternativePathPatterns = Arrays.asList(
+        "{host}_{server}/actual1/deathlogs",
+        "{host}_{server}/actual/deathlogs",
+        "{host}/{server}/actual1/deathlogs",
+        "{host}/{server}/actual/deathlogs",
+        "{server}/actual1/deathlogs",
+        "{server}/actual/deathlogs"
+    );
+    
     /**
-     * Validate and synchronize player statistics to ensure data integrity
-     * @param playerRepository The player repository to use for validation
-     * @return Number of player records corrected
+     * Resolve a CSV path for a given server
+     * @param server The server
+     * @param sftpConnector SFTP connector
+     * @return The resolved path, or the original if resolution failed
      */
-    public static int validateAndSyncStats(PlayerRepository playerRepository) {
+    public static String resolveServerCsvPath(GameServer server, SftpConnector sftpConnector) {
+        if (server == null) {
+            return null;
+        }
+        
         try {
-            logger.info("Starting player stats validation and sync");
-            int correctionCount = 0;
+            String serverKey = getServerKey(server);
             
-            // Get guild IDs from existing players for proper isolation
-            List<Long> guildIds = getDistinctGuildIds(playerRepository);
-            long totalPlayers = 0;
+            // Check cache first
+            String cachedPath = successfulPaths.get(serverKey);
+            if (cachedPath != null) {
+                logger.debug("Using cached CSV path for server {}: {}", server.getName(), cachedPath);
+                return cachedPath;
+            }
             
-            // Process each guild with proper isolation context
-            for (Long guildId : guildIds) {
-                if (guildId != null && guildId > 0) {
-                    // Set isolation context for this guild
-                    com.deadside.bot.utils.GuildIsolationManager.getInstance().setContext(guildId, null);
+            // Check if current path works
+            String currentPath = server.getDeathlogsDirectory();
+            if (currentPath != null && !currentPath.isEmpty() && 
+                testPath(server, currentPath, sftpConnector)) {
+                // Current path works, cache it
+                successfulPaths.put(serverKey, currentPath);
+                return currentPath;
+            }
+            
+            // Try alternative paths
+            String host = server.getSftpHost();
+            if (host == null || host.isEmpty()) {
+                host = server.getHost();
+            }
+            
+            String serverName = server.getServerId();
+            if (serverName == null || serverName.isEmpty()) {
+                serverName = server.getName().replaceAll("\\s+", "_");
+            }
+            
+            for (String pattern : alternativePathPatterns) {
+                String path = pattern
+                    .replace("{host}", host)
+                    .replace("{server}", serverName);
+                
+                if (testPath(server, path, sftpConnector)) {
+                    // Path works, update server and cache it
+                    server.setDeathlogsDirectory(path);
+                    successfulPaths.put(serverKey, path);
                     
-                    try {
-                        // Use isolation-aware methods - get all servers for this guild
-                        com.deadside.bot.db.repositories.GameServerRepository serverRepo = new com.deadside.bot.db.repositories.GameServerRepository();
-                        List<com.deadside.bot.db.models.GameServer> guildServers = serverRepo.findAllByGuildId(guildId);
-                        
-                        // Process each server for this guild
-                        List<Player> guildPlayers = new java.util.ArrayList<>();
-                        for (com.deadside.bot.db.models.GameServer server : guildServers) {
-                            List<Player> serverPlayers = playerRepository.findByGuildIdAndServerId(guildId, server.getServerId());
-                            guildPlayers.addAll(serverPlayers);
-                        }
-                        
-                        totalPlayers += guildPlayers.size();
-                        
-                        // Process players for this guild with proper isolation
-                        for (Player player : guildPlayers) {
-                            if (validateAndFixPlayerStats(player, playerRepository)) {
-                                correctionCount++;
-                            }
-                        }
-                    } finally {
-                        // Always clear context
-                        com.deadside.bot.utils.GuildIsolationManager.getInstance().clearContext();
-                    }
+                    logger.info("Resolved CSV path for server {}: {} -> {}", 
+                        server.getName(), currentPath, path);
+                    
+                    return path;
                 }
             }
             
-            logger.info("Found {} total player records to verify", totalPlayers);
-            logger.info("Completed player stats validation and sync, corrected {} records", correctionCount);
-            return correctionCount;
+            // No valid path found, return original
+            logger.warn("Could not resolve CSV path for server {}", server.getName());
+            return currentPath;
         } catch (Exception e) {
-            logger.error("Error validating and syncing player stats: {}", e.getMessage(), e);
-            return 0;
+            logger.error("Error resolving CSV path for server {}: {}", 
+                server.getName(), e.getMessage(), e);
+            return server.getDeathlogsDirectory();
         }
     }
     
     /**
-     * Get distinct guild IDs from all player records for isolation-aware processing
+     * Update paths for all servers in a guild
+     * @param guildId The guild ID
+     * @param repository The game server repository
+     * @param sftpConnector The SFTP connector
+     * @return Number of servers updated
      */
-    private static List<Long> getDistinctGuildIds(PlayerRepository playerRepository) {
+    public static int updateGuildServerPaths(long guildId, 
+                                          GameServerRepository repository, 
+                                          SftpConnector sftpConnector) {
+        int updated = 0;
+        
         try {
-            // Create a GameServerRepository to get guild IDs using isolation-aware methods
-            // This is better than using getAllPlayers() which doesn't respect isolation
-            com.deadside.bot.db.repositories.GameServerRepository serverRepo = 
-                new com.deadside.bot.db.repositories.GameServerRepository();
+            // Set context for guild
+            com.deadside.bot.utils.GuildIsolationManager.getInstance().setContext(guildId, null);
             
-            // Get distinct guild IDs using the proper isolation-aware method
-            return serverRepo.getDistinctGuildIds();
+            try {
+                List<GameServer> servers = repository.findAllByGuildId(guildId);
+                
+                for (GameServer server : servers) {
+                    if (updateServerPaths(server, repository, sftpConnector)) {
+                        updated++;
+                    }
+                }
+            } finally {
+                // Always clear context
+                com.deadside.bot.utils.GuildIsolationManager.getInstance().clearContext();
+            }
         } catch (Exception e) {
-            logger.error("Error getting distinct guild IDs using isolation-aware methods: {}", e.getMessage(), e);
-            return new java.util.ArrayList<>();
+            logger.error("Error updating paths for guild {}: {}", guildId, e.getMessage(), e);
         }
+        
+        return updated;
     }
     
     /**
-     * Validate and fix player stats with proper isolation
+     * Update paths for a server
+     * @param server The server
+     * @param repository The game server repository
+     * @param sftpConnector The SFTP connector
+     * @return True if updated
      */
-    private static boolean validateAndFixPlayerStats(Player player, PlayerRepository playerRepository) {
-        // Implement stat validation and correction logic here
-        // For now just return false as we're not making actual corrections yet
-        return false;
-    }
-    
-    /**
-     * Fix stat discrepancies for a specific player within proper isolation boundaries
-     * @param player The player to fix stats for
-     * @param playerRepository The player repository to use for updates
-     * @return True if fixes were applied
-     */
-    public static boolean fixPlayerStats(Player player, PlayerRepository playerRepository) {
+    public static boolean updateServerPaths(GameServer server, 
+                                         GameServerRepository repository, 
+                                         SftpConnector sftpConnector) {
+        if (server == null) {
+            return false;
+        }
+        
         try {
-            if (player == null) {
-                return false;
+            boolean updated = false;
+            
+            // Resolve CSV path
+            String originalCsvPath = server.getDeathlogsDirectory();
+            String resolvedCsvPath = resolveServerCsvPath(server, sftpConnector);
+            
+            if (resolvedCsvPath != null && !resolvedCsvPath.equals(originalCsvPath)) {
+                server.setDeathlogsDirectory(resolvedCsvPath);
+                updated = true;
             }
             
-            // Check if player has proper isolation fields
-            if (player.getGuildId() <= 0 || player.getServerId() == null || player.getServerId().isEmpty()) {
-                logger.warn("Cannot fix stats for player without proper isolation fields: {}", 
-                    player.getName() != null ? player.getName() : "unknown");
-                return false;
+            // Resolve Log path
+            String originalLogPath = server.getLogDirectory();
+            String resolvedLogPath = LogParserFix.resolveServerLogPath(server, sftpConnector);
+            
+            if (resolvedLogPath != null && !resolvedLogPath.equals(originalLogPath)) {
+                server.setLogDirectory(resolvedLogPath);
+                updated = true;
             }
             
-            // Fix K/D ratio calculation issues
-            boolean needsUpdate = false;
-            
-            // Fix negative kills (data corruption)
-            if (player.getKills() < 0) {
-                player.setKills(0);
-                needsUpdate = true;
-            }
-            
-            // Fix negative deaths (data corruption)
-            if (player.getDeaths() < 0) {
-                player.setDeaths(0);
-                needsUpdate = true;
-            }
-            
-            // Update the player if needed
-            if (needsUpdate) {
-                playerRepository.save(player);
-                logger.debug("Fixed stats for player {} with isolation (Guild={}, Server={})",
-                    player.getName(), player.getGuildId(), player.getServerId());
+            // Save if updated
+            if (updated) {
+                repository.save(server);
+                logger.info("Updated paths for server {}. CSV: {} -> {}, Log: {} -> {}", 
+                    server.getName(), originalCsvPath, resolvedCsvPath,
+                    originalLogPath, resolvedLogPath);
                 return true;
             }
             
             return false;
         } catch (Exception e) {
-            logger.error("Error fixing player stats: {}", 
-                player != null ? player.getName() : "unknown", e);
+            logger.error("Error updating paths for server {}: {}", 
+                server.getName(), e.getMessage(), e);
             return false;
         }
     }
     
     /**
-     * Process a death log line with enhanced error handling and proper isolation
-     * @param server The game server with proper isolation fields
-     * @param logLine The log line to process
-     * @param playerRepository The player repository to use for data access
-     * @return True if processing was successful
+     * Test if a path is valid
+     * @param server The server
+     * @param path The path to test
+     * @param sftpConnector The SFTP connector
+     * @return True if valid
      */
-    public static boolean processDeathLogLineFixed(GameServer server, String logLine, PlayerRepository playerRepository) {
+    private static boolean testPath(GameServer server, String path, SftpConnector sftpConnector) {
         try {
-            if (server == null || logLine == null || logLine.isEmpty() || playerRepository == null) {
-                return false;
-            }
-            
-            // Check if server has valid isolation fields
-            if (server.getGuildId() <= 0) {
-                logger.warn("Cannot process death log for server without proper guild ID: {}", 
-                    server.getName());
-                return false;
-            }
-            
-            // This is a placeholder implementation that ensures data isolation
-            // In a real implementation, this would parse the log line and update player stats
-            logger.debug("Processing death log line for server {} with guild isolation {}",
-                server.getName(), server.getGuildId());
-                
-            return true;
+            return sftpConnector.testConnection(server, path);
         } catch (Exception e) {
-            logger.error("Error processing death log line for server {}: {}", 
-                server != null ? server.getName() : "unknown", e.getMessage(), e);
             return false;
         }
+    }
+    
+    /**
+     * Get a unique key for a server
+     * @param server The server
+     * @return The key
+     */
+    private static String getServerKey(GameServer server) {
+        return server.getGuildId() + ":" + server.getId();
     }
 }

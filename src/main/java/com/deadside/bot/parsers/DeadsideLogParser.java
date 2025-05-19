@@ -496,8 +496,26 @@ public class DeadsideLogParser {
      * Get the path to the server log file
      */
     private String getServerLogPath(GameServer server) {
-        // Check if the existing path already follows the correct pattern
+        // Apply path resolution fix for log files
         String currentLogDir = server.getLogDirectory();
+        
+        try {
+            // Use our path resolution system to find the correct log directory
+            String resolvedLogDir = com.deadside.bot.sftp.PathResolutionFix.resolveLogPath(server, sftpConnector);
+            
+            if (resolvedLogDir != null && !resolvedLogDir.equals(currentLogDir)) {
+                // Update the server with the resolved path
+                server.setLogDirectory(resolvedLogDir);
+                serverRepository.save(server);
+                logger.info("Updated log directory for server {} to {} (was: {})", 
+                    server.getName(), resolvedLogDir, currentLogDir);
+                return resolvedLogDir + "/Deadside.log";
+            }
+        } catch (Exception e) {
+            logger.debug("Error in path resolution, falling back to standard approach: {}", e.getMessage());
+        }
+        
+        // If the existing path is valid, use it
         if (currentLogDir != null && !currentLogDir.isEmpty() && 
             (currentLogDir.contains("/Logs") || currentLogDir.contains("\\Logs"))) {
             return currentLogDir + "/Deadside.log";

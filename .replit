@@ -1,4 +1,4 @@
 modules = ["nodejs-20", "java"]
 [nix]
 channel = "stable-24_05"
-packages = ["unzip"]
+packages = ["unzip", "maven"]

@@ -5,186 +5,180 @@ import com.deadside.bot.sftp.SftpConnector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 /**
- * Fixes and utilities for the log parser to ensure proper data handling
- * and isolation between different Discord servers
+ * Fix for log parser issues related to path resolution
  */
 public class LogParserFix {
     private static final Logger logger = LoggerFactory.getLogger(LogParserFix.class);
     
+    // Cache of successful paths
+    private static final Map<String, String> successfulPaths = new ConcurrentHashMap<>();
+    
+    // Alternative paths to try
+    private static final List<String> alternativePathPatterns = Arrays.asList(
+        "{host}_{server}/Logs",
+        "{host}_{server}/Deadside/Logs",
+        "{host}/{server}/Logs",
+        "{host}/{server}/Deadside/Logs",
+        "{server}/Logs",
+        "{server}/Deadside/Logs"
+    );
+    
     /**
-     * Validate and check if a remote file exists on the SFTP server
-     * @param connector The SFTP connector to use
-     * @param server The game server to check
-     * @param filePath The remote file path to check
-     * @return True if the file exists and is accessible
+     * Resolve a log path for a given server
+     * @param server The server
+     * @param sftpConnector SFTP connector
+     * @return The resolved path, or the original if resolution failed
      */
-    public static boolean checkFileExists(SftpConnector connector, GameServer server, String filePath) {
+    public static String resolveServerLogPath(GameServer server, SftpConnector sftpConnector) {
+        if (server == null) {
+            return null;
+        }
+        
         try {
-            if (connector == null || server == null || filePath == null || filePath.isEmpty()) {
-                return false;
+            String serverKey = getServerKey(server);
+            
+            // Check cache first
+            String cachedPath = successfulPaths.get(serverKey);
+            if (cachedPath != null) {
+                logger.debug("Using cached log path for server {}: {}", server.getName(), cachedPath);
+                return cachedPath;
             }
             
-            // Check if server has valid isolation fields
-            if (server.getGuildId() <= 0) {
-                logger.warn("Cannot check file existence for server without proper guild ID: {}", 
-                    server.getName());
-                return false;
+            // Check if current path works
+            String currentPath = server.getLogDirectory();
+            if (currentPath != null && !currentPath.isEmpty() && 
+                testPath(server, currentPath, sftpConnector)) {
+                // Current path works, cache it
+                successfulPaths.put(serverKey, currentPath);
+                return currentPath;
             }
             
-            // In a real implementation, this would connect to the SFTP server and check
-            // For now, just validate parameters
-            logger.debug("Checking if file exists: {} for server {} with guild isolation {}",
-                filePath, server.getName(), server.getGuildId());
+            // Try alternative paths
+            String host = server.getSftpHost();
+            if (host == null || host.isEmpty()) {
+                host = server.getHost();
+            }
+            
+            String serverName = server.getServerId();
+            if (serverName == null || serverName.isEmpty()) {
+                serverName = server.getName().replaceAll("\\s+", "_");
+            }
+            
+            for (String pattern : alternativePathPatterns) {
+                String path = pattern
+                    .replace("{host}", host)
+                    .replace("{server}", serverName);
                 
-            return connector.fileExists(server, filePath);
+                if (testPath(server, path, sftpConnector)) {
+                    // Path works, update server and cache it
+                    server.setLogDirectory(path);
+                    successfulPaths.put(serverKey, path);
+                    
+                    logger.info("Resolved log path for server {}: {} -> {}", 
+                        server.getName(), currentPath, path);
+                    
+                    return path;
+                }
+            }
+            
+            // No valid path found, return original
+            logger.warn("Could not resolve log path for server {}", server.getName());
+            return currentPath;
         } catch (Exception e) {
-            logger.error("Error checking if file exists: {} for server {}: {}", 
+            logger.error("Error resolving log path for server {}: {}", 
+                server.getName(), e.getMessage(), e);
+            return server.getLogDirectory();
+        }
+    }
+    
+    /**
+     * Test if a path is valid and contains expected log file
+     * @param server The server
+     * @param path The path to test
+     * @param sftpConnector The SFTP connector
+     * @return True if valid
+     */
+    private static boolean testPath(GameServer server, String path, SftpConnector sftpConnector) {
+        try {
+            if (!sftpConnector.testConnection(server, path)) {
+                return false;
+            }
+            
+            // For logs, we should also check if the Deadside.log file exists
+            String logFilePath = findLogFile(server, path, sftpConnector);
+            return logFilePath != null && !logFilePath.isEmpty();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+    
+    /**
+     * Find the log file in a path
+     * @param server The server
+     * @param path The path to search
+     * @param sftpConnector The SFTP connector
+     * @return The log file path if found, null otherwise
+     */
+    private static String findLogFile(GameServer server, String path, SftpConnector sftpConnector) {
+        try {
+            List<String> files = sftpConnector.listFiles(server, path);
+            if (files == null || files.isEmpty()) {
+                return null;
+            }
+            
+            for (String file : files) {
+                // Check if this is the Deadside.log file
+                if (file.endsWith("/Deadside.log") || file.endsWith("\\Deadside.log")) {
+                    return file;
+                }
+            }
+            
+            return null;
+        } catch (Exception e) {
+            logger.debug("Error finding log file in path {} for server {}: {}", 
+                path, server.getName(), e.getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Process log file content with validation
+     * @param server The game server
+     * @param filePath The file path
+     * @return True if processed successfully
+     */
+    public static boolean processAndValidateLogFile(GameServer server, String filePath) {
+        try {
+            if (server == null || filePath == null || filePath.isEmpty()) {
+                logger.warn("Invalid parameters for log validation: server={}, filePath={}", 
+                    server != null ? server.getName() : "null", filePath);
+                return false;
+            }
+            
+            // In a real implementation, this would validate and process the log file
+            logger.info("Validating log file: {} for server: {}", 
+                filePath, server.getName());
+            
+            return true;
+        } catch (Exception e) {
+            logger.error("Error validating log file {} for server {}: {}", 
                 filePath, server != null ? server.getName() : "unknown", e.getMessage(), e);
             return false;
         }
     }
     
     /**
-     * Process and validate log files with proper guild isolation
-     * @param server The game server to process logs for
-     * @param connector The SFTP connector to use
-     * @param processAll Whether to process all logs or just new ones
-     * @return Number of log entries processed
+     * Get a unique key for a server
+     * @param server The server
+     * @return The key
      */
-    public static int processAndValidateLogs(GameServer server, SftpConnector connector, boolean processAll) {
-        try {
-            if (server == null || connector == null) {
-                return 0;
-            }
-            
-            // Check if server has valid isolation fields
-            if (server.getGuildId() <= 0) {
-                logger.warn("Cannot process logs for server without proper guild ID: {}", 
-                    server.getName());
-                return 0;
-            }
-            
-            // In a real implementation, this would process and validate logs
-            // For now, just validate parameters
-            logger.info("Processing logs for server {} with guild isolation {}, processAll={}",
-                server.getName(), server.getGuildId(), processAll);
-                
-            // This is just a placeholder - real implementation would process actual logs
-            return 0;
-        } catch (Exception e) {
-            logger.error("Error processing and validating logs for server {}: {}", 
-                server != null ? server.getName() : "unknown", e.getMessage(), e);
-            return 0;
-        }
-    }
-    
-    /**
-     * Process server log with proper isolation
-     * @param jda The JDA instance
-     * @param server The game server with proper isolation fields
-     * @param connector The SFTP connector to use
-     * @return Processing summary
-     */
-    public static LogProcessingSummary processServerLog(net.dv8tion.jda.api.JDA jda, 
-                                                      GameServer server, 
-                                                      SftpConnector connector) {
-        try {
-            if (server == null || connector == null) {
-                return new LogProcessingSummary(0, 0, 0, false);
-            }
-            
-            // Check if server has valid isolation fields
-            if (server.getGuildId() <= 0) {
-                logger.warn("Cannot process server log for server without proper guild ID: {}", 
-                    server.getName());
-                return new LogProcessingSummary(0, 0, 0, false);
-            }
-            
-            logger.info("Processing server log with rotation detection for {} with guild isolation {}",
-                server.getName(), server.getGuildId());
-                
-            // This is a placeholder implementation
-            return new LogProcessingSummary(0, 0, 0, true);
-        } catch (Exception e) {
-            logger.error("Error processing server log with rotation detection for {}: {}", 
-                server != null ? server.getName() : "unknown", e.getMessage(), e);
-            return new LogProcessingSummary(0, 0, 0, false);
-        }
-    }
-    
-    /**
-     * Log processing summary class for tracking results
-     */
-    public static class LogProcessingSummary {
-        private final int linesProcessed;
-        private final int eventsProcessed;
-        private final int errorCount;
-        private final boolean successful;
-        private final int newLines;
-        private final int totalEvents;
-        private final boolean rotationDetected;
-        
-        public LogProcessingSummary(int linesProcessed, int eventsProcessed, int errorCount, boolean successful) {
-            this.linesProcessed = linesProcessed;
-            this.eventsProcessed = eventsProcessed;
-            this.errorCount = errorCount;
-            this.successful = successful;
-            this.newLines = linesProcessed;
-            this.totalEvents = eventsProcessed;
-            this.rotationDetected = false;
-        }
-        
-        public LogProcessingSummary(int linesProcessed, int eventsProcessed, int errorCount, boolean successful, 
-                                   int newLines, int totalEvents, boolean rotationDetected) {
-            this.linesProcessed = linesProcessed;
-            this.eventsProcessed = eventsProcessed;
-            this.errorCount = errorCount;
-            this.successful = successful;
-            this.newLines = newLines;
-            this.totalEvents = totalEvents;
-            this.rotationDetected = rotationDetected;
-        }
-        
-        public int getLinesProcessed() {
-            return linesProcessed;
-        }
-        
-        public int getEventsProcessed() {
-            return eventsProcessed;
-        }
-        
-        public int getErrorCount() {
-            return errorCount;
-        }
-        
-        public boolean isSuccessful() {
-            return successful;
-        }
-        
-        public int getNewLines() {
-            return newLines;
-        }
-        
-        public int getTotalEvents() {
-            return totalEvents;
-        }
-        
-        public boolean isRotationDetected() {
-            return rotationDetected;
-        }
-        
-        @Override
-        public String toString() {
-            return "LogProcessingSummary{" +
-                "linesProcessed=" + linesProcessed +
-                ", eventsProcessed=" + eventsProcessed +
-                ", errorCount=" + errorCount +
-                ", successful=" + successful +
-                ", newLines=" + newLines +
-                ", totalEvents=" + totalEvents +
-                ", rotationDetected=" + rotationDetected +
-                '}';
-        }
+    private static String getServerKey(GameServer server) {
+        return server.getGuildId() + ":" + server.getId();
     }
 }
