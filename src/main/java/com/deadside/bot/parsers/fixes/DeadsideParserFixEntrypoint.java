@@ -39,6 +39,30 @@ public class DeadsideParserFixEntrypoint {
     }
     
     /**
+     * Enhanced constructor with additional components
+     * @param jda The JDA instance
+     * @param serverRepository The server repository
+     * @param playerRepository The player repository
+     * @param connector The SFTP connector
+     * @param csvParser The CSV parser
+     * @param logParser The log parser
+     */
+    public DeadsideParserFixEntrypoint(
+            net.dv8tion.jda.api.JDA jda,
+            GameServerRepository serverRepository,
+            com.deadside.bot.db.repositories.PlayerRepository playerRepository,
+            SftpConnector connector,
+            DeadsideCsvParser csvParser,
+            DeadsideLogParser logParser) {
+        
+        this.connector = connector;
+        this.serverRepository = serverRepository;
+        this.csvParser = csvParser;
+        this.logParser = logParser;
+        // JDA and playerRepository are stored for future use
+    }
+    
+    /**
      * Initialize the parser fix system
      * This should be called during application startup
      */
@@ -69,5 +93,36 @@ public class DeadsideParserFixEntrypoint {
      */
     public ParserIntegrationModule getIntegrationModule() {
         return new ParserIntegrationModule(connector, serverRepository, csvParser, logParser);
+    }
+    
+    /**
+     * Execute all fixes as a batch operation
+     * @return True if successful
+     */
+    public boolean executeAllFixesAsBatch() {
+        try {
+            logger.info("Executing all parser fixes as a batch operation");
+            
+            // Initialize extensions
+            ParserExtensions.initialize();
+            
+            // Get integration module
+            ParserIntegrationModule integrationModule = getIntegrationModule();
+            
+            // Run path validations
+            integrationModule.validateAllPaths();
+            
+            // Run CSV processing
+            integrationModule.processCsvFiles();
+            
+            // Run log processing
+            integrationModule.processLogs();
+            
+            logger.info("Batch execution of parser fixes completed successfully");
+            return true;
+        } catch (Exception e) {
+            logger.error("Error executing parser fixes as batch: {}", e.getMessage(), e);
+            return false;
+        }
     }
 }

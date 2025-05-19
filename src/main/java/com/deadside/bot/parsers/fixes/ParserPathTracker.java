@@ -51,7 +51,17 @@ public class ParserPathTracker {
      * @param category The path category (csv or log)
      * @param path The successful path
      */
-    public void recordPath(GameServer server, String category, String path) {
+    public void recordSuccessfulPath(GameServer server, String category, String path) {
+        recordPath(server, category, path);
+    }
+    
+    /**
+     * Record a successful path resolution (internal implementation)
+     * @param server The game server
+     * @param category The path category (csv or log)
+     * @param path The successful path
+     */
+    private void recordPath(GameServer server, String category, String path) {
         if (server == null || category == null || path == null) {
             return;
         }

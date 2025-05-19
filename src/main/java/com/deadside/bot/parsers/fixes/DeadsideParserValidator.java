@@ -207,4 +207,55 @@ public class DeadsideParserValidator {
             return results;
         }
     }
+    
+    /**
+     * Validate all parser components
+     * This method checks the entire parser system
+     * @return Validation results
+     */
+    public ValidationResults validateAllParserComponents() {
+        Map<String, Object> results = new HashMap<>();
+        boolean valid = true;
+        
+        try {
+            logger.info("Validating all parser components");
+            
+            // Check if extensions are initialized
+            boolean extensionsInitialized = ParserExtensions.isInitialized();
+            results.put("extensionsInitialized", extensionsInitialized);
+            valid = valid && extensionsInitialized;
+            
+            // Check if hooks are registered
+            boolean hooksRegistered = true; // Simplified for compilation
+            try {
+                hooksRegistered = ParserIntegrationHooks.areHooksRegistered();
+            } catch (Exception e) {
+                logger.warn("Error checking if hooks are registered: {}", e.getMessage());
+                hooksRegistered = false;
+            }
+            results.put("hooksRegistered", hooksRegistered);
+            valid = valid && hooksRegistered;
+            
+            // Check if parser registry is initialized
+            boolean registryInitialized = true; // Simplified for compilation
+            try {
+                registryInitialized = DeadsideParserPathRegistry.getInstance().isInitialized();
+            } catch (Exception e) {
+                logger.warn("Error checking if registry is initialized: {}", e.getMessage());
+                registryInitialized = false;
+            }
+            results.put("registryInitialized", registryInitialized);
+            valid = valid && registryInitialized;
+            
+            logger.info("Parser component validation complete: extensions initialized: {}, hooks registered: {}, registry initialized: {}",
+                extensionsInitialized, hooksRegistered, registryInitialized);
+            
+            return new ValidationResults(valid, results);
+        } catch (Exception e) {
+            logger.error("Error validating parser components: {}", e.getMessage(), e);
+            
+            results.put("error", e.getMessage());
+            return new ValidationResults(false, results);
+        }
+    }
 }

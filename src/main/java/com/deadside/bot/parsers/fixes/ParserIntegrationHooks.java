@@ -281,4 +281,15 @@ public class ParserIntegrationHooks {
         
         logger.info("Cleared all path caches");
     }
+    
+    /**
+     * Check if hooks are registered
+     * @return True if hooks are registered
+     */
+    public static boolean areHooksRegistered() {
+        // We consider hooks registered if we have at least one server in the cache
+        boolean registered = !serverPathCache.isEmpty();
+        logger.debug("Hooks registered: {}", registered);
+        return registered;
+    }
 }

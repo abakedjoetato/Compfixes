@@ -356,6 +356,46 @@ public class PlayerRepository {
     }
     
     /**
+     * Find a player by name and server ID
+     * @param name Player's name
+     * @param serverId Server's ID
+     * @return Player object or empty Optional
+     */
+    public java.util.Optional<Player> findByNameAndServerId(String name, String serverId) {
+        try {
+            if (name == null || name.isEmpty() || serverId == null || serverId.isEmpty()) {
+                logger.warn("Attempted to find player by name and server ID with invalid parameters. Name: {}, Server ID: {}", 
+                    name, serverId);
+                return java.util.Optional.empty();
+            }
+            
+            Player player = getCollection().find(Filters.and(
+                Filters.eq("name", name),
+                Filters.eq("serverId", serverId)
+            )).first();
+            
+            return player != null ? java.util.Optional.of(player) : java.util.Optional.empty();
+        } catch (Exception e) {
+            logger.error("Error finding player by name and server ID: {}, {}", name, serverId, e);
+            return java.util.Optional.empty();
+        }
+    }
+    
+    /**
+     * Find a player by name and server ID (ObjectId version)
+     * @param name Player's name
+     * @param serverId Server's ObjectId
+     * @return Player object or empty Optional
+     */
+    public java.util.Optional<Player> findByNameAndServerId(String name, ObjectId serverId) {
+        if (serverId == null) {
+            logger.warn("Attempted to find player with null server ID");
+            return java.util.Optional.empty();
+        }
+        return findByNameAndServerId(name, serverId.toString());
+    }
+    
+    /**
      * Find a player by name with guild and server isolation
      */
     public Player findByNameAndGuildIdAndServerId(String name, long guildId, String serverId) {

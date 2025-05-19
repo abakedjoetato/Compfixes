@@ -1,10 +1,5 @@
 package com.deadside.bot.parsers.fixes;
 
-import com.deadside.bot.db.models.GameServer;
-import com.deadside.bot.db.repositories.GameServerRepository;
-import com.deadside.bot.parsers.DeadsideCsvParser;
-import com.deadside.bot.parsers.DeadsideLogParser;
-import com.deadside.bot.sftp.SftpConnector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -14,26 +9,30 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Registry for Deadside parser paths
- * This class maintains a registry of successful parser paths for servers
+ * This class provides a registry for parser paths
  */
 public class DeadsideParserPathRegistry {
     private static final Logger logger = LoggerFactory.getLogger(DeadsideParserPathRegistry.class);
     
-    // Singleton instance
-    private static DeadsideParserPathRegistry instance;
-    
-    // Path types
+    // Path type constants
     public static final String PATH_TYPE_CSV = "csv";
     public static final String PATH_TYPE_LOGS = "logs";
     
-    // Path registry
-    private final Map<Long, Map<String, String>> serverPaths;
+    // Singleton instance
+    private static DeadsideParserPathRegistry instance;
+    
+    // Path registry data
+    private final Map<String, Map<String, String>> pathRegistry = new ConcurrentHashMap<>();
+    
+    // Initialization flag
+    private boolean initialized = false;
     
     /**
-     * Constructor (private for singleton)
+     * Private constructor for singleton
      */
     private DeadsideParserPathRegistry() {
-        serverPaths = new ConcurrentHashMap<>();
+        // Initialize the registry
+        initialize();
     }
     
     /**
@@ -44,126 +43,121 @@ public class DeadsideParserPathRegistry {
         if (instance == null) {
             instance = new DeadsideParserPathRegistry();
         }
-        
         return instance;
     }
     
     /**
-     * Initialize the registry with required components
-     * @param repository The game server repository
-     * @param connector The SFTP connector
-     * @param csvParser The CSV parser
-     * @param logParser The log parser
-     * @return True if initialized successfully
+     * Initialize the registry
      */
-    public boolean initialize(
-            GameServerRepository repository,
-            SftpConnector connector,
-            DeadsideCsvParser csvParser,
-            DeadsideLogParser logParser) {
-        try {
-            logger.info("Initializing DeadsideParserPathRegistry");
-            // No actual initialization needed in this implementation
-            return true;
-        } catch (Exception e) {
-            logger.error("Error initializing DeadsideParserPathRegistry: {}", e.getMessage(), e);
-            return false;
+    public void initialize() {
+        if (initialized) {
+            logger.debug("Registry already initialized");
+            return;
         }
+        
+        logger.info("Initializing path registry");
+        
+        // Clear any existing data
+        pathRegistry.clear();
+        
+        // Set initialization flag
+        initialized = true;
+        
+        logger.info("Path registry initialized");
     }
     
     /**
-     * Register a successful path for a server
-     * @param server The game server
-     * @param pathType The path type (csv or logs)
+     * Initialize with additional components
+     * This overload exists for compatibility with calling code
+     */
+    public void initialize(
+            com.deadside.bot.db.repositories.GameServerRepository serverRepository, 
+            com.deadside.bot.sftp.SftpConnector connector,
+            com.deadside.bot.parsers.DeadsideCsvParser csvParser,
+            com.deadside.bot.parsers.DeadsideLogParser logParser) {
+        // Call basic initialization
+        initialize();
+        
+        // Additional initialization can be added here if needed
+        logger.info("Path registry initialized with components");
+    }
+    
+    /**
+     * Check if the registry is initialized
+     * @return True if initialized
+     */
+    public boolean isInitialized() {
+        return initialized;
+    }
+    
+    /**
+     * Register a path
+     * @param serverId The server ID
+     * @param pathType The path type (csv, log)
      * @param path The path
      */
-    public void registerPath(GameServer server, String pathType, String path) {
-        if (server == null || pathType == null || path == null) {
+    public void registerPath(String serverId, String pathType, String path) {
+        if (serverId == null || serverId.isEmpty() || pathType == null || pathType.isEmpty() || path == null || path.isEmpty()) {
+            logger.warn("Invalid parameters for registerPath: serverId={}, pathType={}, path={}", serverId, pathType, path);
             return;
         }
         
-        try {
-            String serverIdStr = server.getId().toString();
-            Long serverId = Long.parseLong(serverIdStr);
-            
-            if (serverId == null) {
-                logger.warn("Cannot register path for server with null ID: {}", server.getName());
-                return;
-            }
-            
-            // Get or create server paths
-            Map<String, String> paths = serverPaths.computeIfAbsent(serverId, k -> new HashMap<>());
-            
-            // Register path
-            paths.put(pathType, path);
-            
-            logger.info("Registered {} path for server {}: {}", 
-                pathType, server.getName(), path);
-        } catch (Exception e) {
-            logger.error("Error registering path for server {}: {}", 
-                server.getName(), e.getMessage(), e);
-        }
+        // Get or create server registry
+        Map<String, String> serverRegistry = pathRegistry.computeIfAbsent(serverId, k -> new HashMap<>());
+        
+        // Store path
+        serverRegistry.put(pathType, path);
+        
+        logger.debug("Registered path for server {}: {}={}", serverId, pathType, path);
     }
     
     /**
-     * Get a registered path for a server
-     * @param server The game server
-     * @param pathType The path type (csv or logs)
-     * @return The path, or null if not registered
+     * Get a registered path
+     * @param serverId The server ID
+     * @param pathType The path type (csv, log)
+     * @return The registered path, or null if not found
      */
-    public String getPath(GameServer server, String pathType) {
-        if (server == null || pathType == null) {
+    public String getPath(String serverId, String pathType) {
+        if (serverId == null || serverId.isEmpty() || pathType == null || pathType.isEmpty()) {
+            logger.warn("Invalid parameters for getPath: serverId={}, pathType={}", serverId, pathType);
             return null;
         }
         
-        try {
-            String serverIdStr = server.getId().toString();
-            Long serverId = Long.parseLong(serverIdStr);
-            
-            if (serverId == null) {
-                return null;
-            }
-            
-            // Get server paths
-            Map<String, String> paths = serverPaths.get(serverId);
-            
-            if (paths == null) {
-                return null;
-            }
-            
-            // Get path
-            return paths.get(pathType);
-        } catch (Exception e) {
-            logger.error("Error getting path for server {}: {}", 
-                server.getName(), e.getMessage(), e);
+        // Check if server is in registry
+        if (!pathRegistry.containsKey(serverId)) {
+            logger.debug("Server {} not found in registry", serverId);
             return null;
         }
+        
+        // Get server registry
+        Map<String, String> serverRegistry = pathRegistry.get(serverId);
+        
+        // Return path
+        return serverRegistry.get(pathType);
     }
     
     /**
-     * Clear paths for a server
-     * @param server The game server
+     * Check if a path is registered
+     * @param serverId The server ID
+     * @param pathType The path type (csv, log)
+     * @return True if the path is registered
      */
-    public void clearPaths(GameServer server) {
-        if (server == null) {
-            return;
+    public boolean hasPath(String serverId, String pathType) {
+        if (serverId == null || serverId.isEmpty() || pathType == null || pathType.isEmpty()) {
+            logger.warn("Invalid parameters for hasPath: serverId={}, pathType={}", serverId, pathType);
+            return false;
         }
         
-        try {
-            String serverIdStr = server.getId().toString();
-            Long serverId = Long.parseLong(serverIdStr);
-            
-            if (serverId == null) {
-                return;
-            }
-            
-            // Remove server paths
-            serverPaths.remove(serverId);
-            
-            logger.info("Cleared paths for server {}", server.getName());
-        } catch (Exception e) {
-            logger.error("Error clearing paths for server {}: {}", 
-                server.getName(), e.getMessage(), e);
+        // Check if server is in registry
+        if (!pathRegistry.containsKey(serverId)) {
+            logger.debug("Server {} not found in registry", serverId);
+            return false;
         }
+        
+        // Get server registry
+        Map<String, String> serverRegistry = pathRegistry.get(serverId);
+        
+        // Check if path is in registry
+        return serverRegistry.containsKey(pathType);
     }
 }

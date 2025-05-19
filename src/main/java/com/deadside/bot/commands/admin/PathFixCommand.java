@@ -35,6 +35,15 @@ public class PathFixCommand extends ListenerAdapter {
         this.connector = connector;
     }
     
+    /**
+     * Create the command for the JDA SlashCommand system
+     * @return The slash command data for this command
+     */
+    public net.dv8tion.jda.api.interactions.commands.build.SlashCommandData createCommand() {
+        return net.dv8tion.jda.api.interactions.commands.build.Commands.slash("pathfix", "Fix server paths")
+            .addOption(net.dv8tion.jda.api.interactions.commands.OptionType.STRING, "server", "Server name to fix (leave empty for all servers)", false);
+    }
+    
     @Override
     public void onSlashCommandInteraction(SlashCommandInteractionEvent event) {
         if (!event.getName().equals("pathfix")) {

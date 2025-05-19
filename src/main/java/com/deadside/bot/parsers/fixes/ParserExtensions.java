@@ -12,6 +12,69 @@ import org.slf4j.LoggerFactory;
  */
 public class ParserExtensions {
     private static final Logger logger = LoggerFactory.getLogger(ParserExtensions.class);
+    private static boolean initialized = false;
+    
+    /**
+     * Check if the parser extensions are initialized
+     * @return True if initialized
+     */
+    public static boolean isInitialized() {
+        return initialized;
+    }
+    
+    /**
+     * Initialize the parser extensions
+     */
+    public static void initialize() {
+        initialized = true;
+        logger.info("Parser extensions initialized");
+    }
+    
+    /**
+     * Process CSV path for a server
+     * @param server The game server
+     * @param path The CSV path
+     * @return The processed path
+     */
+    public static String processCsvPath(GameServer server, String path) {
+        if (path == null || path.isEmpty()) {
+            return null;
+        }
+        
+        // Normalize path
+        String normalizedPath = path.replace('\\', '/');
+        if (!normalizedPath.endsWith("/")) {
+            normalizedPath += "/";
+        }
+        
+        logger.debug("Processed CSV path for server {}: {} -> {}", 
+            server.getName(), path, normalizedPath);
+        
+        return normalizedPath;
+    }
+    
+    /**
+     * Process log path for a server
+     * @param server The game server
+     * @param path The log path
+     * @return The processed path
+     */
+    public static String processLogPath(GameServer server, String path) {
+        if (path == null || path.isEmpty()) {
+            return null;
+        }
+        
+        // Normalize path
+        String normalizedPath = path.replace('\\', '/');
+        if (!normalizedPath.endsWith("/")) {
+            normalizedPath += "/";
+        }
+        
+        logger.debug("Processed log path for server {}: {} -> {}", 
+            server.getName(), path, normalizedPath);
+        
+        return normalizedPath;
+    }
     
     /**
      * Resolve and update CSV path for a server

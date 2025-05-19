@@ -113,12 +113,70 @@ public class SftpConnector {
             this.channel = channel;
         }
         
+        public SftpConnection(GameServer server) throws JSchException {
+            // This constructor creates a connection from a server config
+            JSch jsch = new JSch();
+            
+            // First try with SFTP-specific credentials if available
+            if (server.isUseSftpForLogs() && server.getSftpHost() != null && !server.getSftpHost().isEmpty()) {
+                String sftp_user = server.getSftpUsername() != null && !server.getSftpUsername().isEmpty() ? 
+                    server.getSftpUsername() : server.getUsername();
+                
+                String sftp_password = server.getSftpPassword() != null && !server.getSftpPassword().isEmpty() ? 
+                    server.getSftpPassword() : server.getPassword();
+                    
+                int sftp_port = server.getSftpPort() > 0 ? server.getSftpPort() : 22;
+                
+                this.session = jsch.getSession(sftp_user, server.getSftpHost(), sftp_port);
+                this.session.setPassword(sftp_password);
+                
+                Properties config = new Properties();
+                config.put("StrictHostKeyChecking", "no");
+                this.session.setConfig(config);
+                this.session.setTimeout(30000);
+                
+                this.session.connect();
+            } else {
+                // Use regular credentials
+                this.session = jsch.getSession(server.getUsername(), server.getHost(), server.getPort());
+                this.session.setPassword(server.getPassword());
+                
+                Properties config = new Properties();
+                config.put("StrictHostKeyChecking", "no");
+                this.session.setConfig(config);
+                this.session.setTimeout(30000);
+                
+                this.session.connect();
+            }
+            
+            // Open SFTP channel
+            this.channel = (ChannelSftp) this.session.openChannel("sftp");
+            this.channel.connect();
+        }
+        
         public Session getSession() {
             return session;
         }
         
         public ChannelSftp getChannel() {
             return channel;
+        }
+        
+        public ChannelSftp getChannelSftp() {
+            return channel;
+        }
+        
+        public void disconnect() {
+            try {
+                if (channel != null && channel.isConnected()) {
+                    channel.disconnect();
+                }
+                if (session != null && session.isConnected()) {
+                    session.disconnect();
+                }
+            } catch (Exception e) {
+                // Log but ignore errors during disconnect
+            }
         }
     }
     private final int timeout;
@@ -298,6 +356,19 @@ public class SftpConnector {
     }
     
     /**
+     * Test connection to an SFTP server with a specific path prefix
+     * @param server The server config
+     * @param pathPrefix The path prefix to test
+     * @return True if connection is successful
+     */
+    public boolean testConnection(GameServer server, String pathPrefix) {
+        logger.debug("Testing connection to server {} with path prefix {}", 
+            server != null ? server.getName() : "null", pathPrefix);
+        // We'll just delegate to the regular test method
+        return testConnection(server);
+    }
+    
+    /**
      * Test connection to an SFTP server
      * @param server The server config
      * @return True if connection is successful
@@ -390,11 +461,69 @@ public class SftpConnector {
             return true;
         } catch (Exception e) {
             // Directory doesn't exist
-            logger.info("Directory doesn't exist on SFTP server: {}", directory);
+            logger.info("Directory doesn't exist: {}", directory);
             return false;
         }
     }
     
+    /**
+     * Download and parse a log file
+     *
+     * @param server The game server
+     * @param logFile The log file path
+     * @return List of log lines
+     */
+    public List<String> downloadLogFile(GameServer server, String logFile) {
+        SftpConnection connection = null;
+        try {
+            // Create path
+            String fullPath = server.getLogDirectory();
+            if (!fullPath.endsWith("/")) {
+                fullPath += "/";
+            }
+            fullPath += logFile;
+            
+            logger.info("Downloading log file: {}", fullPath);
+            
+            // Connect to SFTP
+            connection = new SftpConnection(server);
+            
+            // Download file content
+            InputStream inputStream = connection.getChannelSftp().get(fullPath);
+            if (inputStream == null) {
+                logger.warn("Could not open log file: {}", fullPath);
+                return Collections.emptyList();
+            }
+            
+            // Read content
+            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+            IOUtils.copy(inputStream, outputStream);
+            inputStream.close();
+            
+            // Parse content
+            String content = outputStream.toString(StandardCharsets.UTF_8.name());
+            String[] lines = content.split("\\r?\\n");
+            
+            // Convert to list
+            List<String> logLines = new ArrayList<>();
+            for (String line : lines) {
+                if (line != null && !line.trim().isEmpty()) {
+                    logLines.add(line.trim());
+                }
+            }
+            
+            logger.debug("Downloaded log file {}: {} lines", fullPath, logLines.size());
+            
+            return logLines;
+        } catch (Exception e) {
+            logger.error("Failed to download log file: {}", e.getMessage(), e);
+            return Collections.emptyList();
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
     /**
      * List files in a directory
      * @param server The server config

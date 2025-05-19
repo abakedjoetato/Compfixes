@@ -166,8 +166,21 @@ public class BotParserIntegration {
      * @return The validation results
      */
     public DeadsideParserValidator.ValidationResults validateServer(GameServer server) {
-        DeadsideParserValidator validator = new DeadsideParserValidator(
-            jda, serverRepository, playerRepository, sftpConnector);
-        return validator.validateServer(server);
+        try {
+            DeadsideParserValidator validator = new DeadsideParserValidator(
+                jda, serverRepository, playerRepository, sftpConnector);
+            
+            // Create new validation results with the boolean result
+            boolean isValid = validator.validateServer(server);
+            java.util.Map<String, Object> results = new java.util.HashMap<>();
+            results.put("valid", isValid);
+            
+            return new DeadsideParserValidator.ValidationResults(isValid, results);
+        } catch (Exception e) {
+            logger.error("Error validating server {}: {}", server.getName(), e.getMessage(), e);
+            java.util.Map<String, Object> results = new java.util.HashMap<>();
+            results.put("error", e.getMessage());
+            return new DeadsideParserValidator.ValidationResults(false, results);
+        }
     }
 }

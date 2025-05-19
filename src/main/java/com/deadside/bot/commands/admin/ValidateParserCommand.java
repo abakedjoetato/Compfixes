@@ -60,7 +60,8 @@ public class ValidateParserCommand extends ListenerAdapter {
                 event.getJDA(), gameServerRepository, playerRepository, sftpConnector);
                 
             // Run validation
-            boolean validationSuccess = validator.validateAllParserComponents();
+            DeadsideParserValidator.ValidationResults validationResults = validator.validateAllParserComponents();
+            boolean validationSuccess = validationResults.isSuccessful();
             
             // Run the parser fix entrypoint
             DeadsideParserFixEntrypoint fixEntrypoint = new DeadsideParserFixEntrypoint(

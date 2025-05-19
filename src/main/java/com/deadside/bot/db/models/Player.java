@@ -242,6 +242,18 @@ public class Player {
         return (double) kills / regularDeaths;
     }
     
+    // Store kdRatio field for explicit setting
+    private float kdRatio = 0.0f;
+    
+    /**
+     * Set the K/D ratio explicitly
+     * @param kdRatio The K/D ratio to set
+     */
+    public void setKdRatio(float kdRatio) {
+        this.kdRatio = kdRatio;
+        this.lastUpdated = System.currentTimeMillis();
+    }
+    
     /**
      * Update this player's weapon statistics
      */
