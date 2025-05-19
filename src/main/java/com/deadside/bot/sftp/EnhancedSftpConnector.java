@@ -26,6 +26,47 @@ public class EnhancedSftpConnector extends SftpConnector {
     private static final int MAX_FILES_TO_CHECK = 500;
     
     /**
+     * Connect to an SFTP server using the game server configuration
+     * @param server The game server
+     * @return The session
+     */
+    protected Session connect(GameServer server) throws Exception {
+        SftpConnection connection = super.connect(server);
+        return connection.getSession();
+    }
+    
+    /**
+     * Open an SFTP channel from a session
+     * @param session The session
+     * @return The channel
+     */
+    protected ChannelSftp openChannel(Session session) throws Exception {
+        if (session == null || !session.isConnected()) {
+            throw new Exception("Cannot open SFTP channel: No active session");
+        }
+        
+        ChannelSftp channel = (ChannelSftp) session.openChannel("sftp");
+        channel.connect();
+        return channel;
+    }
+    
+    /**
+     * Close an SFTP channel safely
+     * @param channel The channel to close
+     */
+    protected void closeChannel(ChannelSftp channel) {
+        SftpUtils.closeChannel(channel);
+    }
+    
+    /**
+     * Disconnect an SSH session safely
+     * @param session The session to disconnect
+     */
+    protected void disconnect(Session session) {
+        SftpUtils.disconnect(session);
+    }
+    
+    /**
      * Find CSV files in the deathlogs directory and its parent directories
      * This method adds improved path resolution logic to the standard method
      * @param server The game server
@@ -431,14 +472,11 @@ public class EnhancedSftpConnector extends SftpConnector {
             @SuppressWarnings("unchecked")
             Vector<ChannelSftp.LsEntry> fileList = channel.ls(".");
             
-            if (fileList == null || fileList.isEmpty()) {
+            if (fileList == null) {
                 return files;
             }
             
-            // Keep track of subdirectories
-            List<String> subdirectories = new ArrayList<>();
-            
-            // Check for CSV files and subdirectories
+            // First check for CSV files in the current directory
             for (ChannelSftp.LsEntry entry : fileList) {
                 String filename = entry.getFilename();
                 
@@ -447,32 +485,50 @@ public class EnhancedSftpConnector extends SftpConnector {
                     continue;
                 }
                 
-                // Check if it's a directory
-                if (entry.getAttrs().isDir()) {
-                    // Add to subdirectories
-                    subdirectories.add(path + "/" + filename);
-                } 
                 // Check if it's a CSV file
-                else if (filename.endsWith(".csv")) {
+                if (filename.endsWith(".csv")) {
                     files.add(path + "/" + filename);
+                }
+                
+                // If we found files, stop searching
+                if (files.size() >= MAX_FILES_TO_CHECK) {
+                    break;
                 }
             }
             
-            // If this path has actual/deathlogs or actual1/deathlogs in its name
-            // and contains CSV files, record it as a successful path
-            if (!files.isEmpty() && (path.contains("actual/deathlogs") || path.contains("actual1/deathlogs"))) {
-                // Record successful path
-                com.deadside.bot.parsers.fixes.ParserIntegrationHooks.recordSuccessfulCsvPath(server, path);
+            // If we found files, return them
+            if (!files.isEmpty()) {
+                return files;
             }
             
-            // Check subdirectories recursively
-            for (String subdirectory : subdirectories) {
-                List<String> subdirectoryFiles = findCsvFilesRecursively(server, subdirectory, depth + 1);
-                files.addAll(subdirectoryFiles);
+            // If we didn't find any files, recursively check subdirectories
+            for (ChannelSftp.LsEntry entry : fileList) {
+                String filename = entry.getFilename();
                 
-                // Stop if we have found enough files
-                if (files.size() > MAX_FILES_TO_CHECK) {
-                    break;
+                // Skip . and ..
+                if (filename.equals(".") || filename.equals("..")) {
+                    continue;
+                }
+                
+                // If it's a directory, recursively search it
+                if (entry.getAttrs().isDir()) {
+                    String subPath = path + "/" + filename;
+                    
+                    try {
+                        List<String> subFiles = findCsvFilesRecursively(server, subPath, depth + 1);
+                        
+                        if (subFiles != null && !subFiles.isEmpty()) {
+                            files.addAll(subFiles);
+                            
+                            // If we found enough files, stop searching
+                            if (files.size() >= MAX_FILES_TO_CHECK) {
+                                break;
+                            }
+                        }
+                    } catch (Exception e) {
+                        logger.debug("Error searching directory {} for CSV files: {}", 
+                            subPath, e.getMessage());
+                    }
                 }
             }
             
@@ -513,14 +569,11 @@ public class EnhancedSftpConnector extends SftpConnector {
             @SuppressWarnings("unchecked")
             Vector<ChannelSftp.LsEntry> fileList = channel.ls(".");
             
-            if (fileList == null || fileList.isEmpty()) {
+            if (fileList == null) {
                 return null;
             }
             
-            // Keep track of subdirectories
-            List<String> subdirectories = new ArrayList<>();
-            
-            // Check for the log file and subdirectories
+            // First check for the log file in the current directory
             for (ChannelSftp.LsEntry entry : fileList) {
                 String filename = entry.getFilename();
                 
@@ -529,35 +582,41 @@ public class EnhancedSftpConnector extends SftpConnector {
                     continue;
                 }
                 
-                // Check if it's a directory
-                if (entry.getAttrs().isDir()) {
-                    // Add to subdirectories
-                    subdirectories.add(path + "/" + filename);
-                } 
                 // Check if it's the log file
-                else if (filename.equals("Deadside.log")) {
-                    // If this path has Logs in its name and contains the log file,
-                    // record it as a successful path
-                    if (path.contains("Logs")) {
-                        // Record successful path
-                        com.deadside.bot.parsers.fixes.ParserIntegrationHooks.recordSuccessfulLogPath(server, path);
-                    }
-                    
+                if (filename.equals("Deadside.log")) {
                     return path + "/Deadside.log";
                 }
             }
             
-            // Check subdirectories recursively
-            for (String subdirectory : subdirectories) {
-                String logFile = findLogFileRecursively(server, subdirectory, depth + 1);
-                if (logFile != null) {
-                    return logFile;
+            // If we didn't find the log file, recursively check subdirectories
+            for (ChannelSftp.LsEntry entry : fileList) {
+                String filename = entry.getFilename();
+                
+                // Skip . and ..
+                if (filename.equals(".") || filename.equals("..")) {
+                    continue;
+                }
+                
+                // If it's a directory, recursively search it
+                if (entry.getAttrs().isDir()) {
+                    String subPath = path + "/" + filename;
+                    
+                    try {
+                        String logFile = findLogFileRecursively(server, subPath, depth + 1);
+                        
+                        if (logFile != null) {
+                            return logFile;
+                        }
+                    } catch (Exception e) {
+                        logger.debug("Error searching directory {} for Log file: {}", 
+                            subPath, e.getMessage());
+                    }
                 }
             }
             
             return null;
         } catch (Exception e) {
-            logger.debug("Error finding log file recursively in path {} for server {}: {}", 
+            logger.debug("Error finding Log file recursively in path {} for server {}: {}", 
                 path, server.getName(), e.getMessage());
             return null;
         } finally {
@@ -567,25 +626,20 @@ public class EnhancedSftpConnector extends SftpConnector {
     }
     
     /**
-     * Test if a path exists and is accessible
+     * Test connection to a specific path on a server
      * @param server The game server
-     * @param path The path to test
-     * @return True if the path exists and is accessible
+     * @return True if the connection is successful
      */
     @Override
-    public boolean testConnection(GameServer server, String path) {
-        if (server == null || path == null || path.isEmpty()) {
-            return false;
-        }
-        
-        // Try the standard method first
-        boolean standardResult = super.testConnection(server, path);
+    public boolean testConnection(GameServer server) {
+        // First try the standard test
+        boolean standardResult = super.testConnection(server);
         
         if (standardResult) {
             return true;
         }
         
-        // If standard method failed, try with our enhanced method
+        // If standard test fails, try with our enhanced method
         Session session = null;
         ChannelSftp channel = null;
         
@@ -593,12 +647,12 @@ public class EnhancedSftpConnector extends SftpConnector {
             session = connect(server);
             channel = openChannel(session);
             
-            // Try to navigate to the path
-            channel.cd(path);
-            
+            // Try to list the directory
+            channel.cd(".");
             return true;
         } catch (Exception e) {
-            // Path doesn't exist or error occurred
+            logger.debug("Enhanced connection test failed for server {}: {}", 
+                server.getName(), e.getMessage());
             return false;
         } finally {
             closeChannel(channel);

@@ -1,92 +1,138 @@
 package com.deadside.bot.parsers.fixes;
 
+import com.deadside.bot.db.models.GameServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Path tracker for parser operations
- * Maintains a cache of successful path resolutions
+ * Tracks successful parser paths to improve reliability over time
+ * This class caches successful path resolutions for better performance and reliability
  */
 public class ParserPathTracker {
     private static final Logger logger = LoggerFactory.getLogger(ParserPathTracker.class);
     
-    // Cache maps for CSV and log file paths
-    private static final Map<String, String> csvPathCache = new ConcurrentHashMap<>();
-    private static final Map<String, String> logPathCache = new ConcurrentHashMap<>();
+    // Path categories
+    public static final String CATEGORY_CSV = "csv";
+    public static final String CATEGORY_LOG = "log";
+    
+    // Singleton instance
+    private static ParserPathTracker instance;
+    
+    // Cache for successful paths
+    private Map<String, Map<String, List<String>>> serverPathCache;
     
     /**
-     * Track a successful CSV path resolution
-     * @param serverId The unique server identifier
-     * @param path The resolved path
+     * Private constructor to enforce singleton pattern
      */
-    public static void trackCsvPath(String serverId, String path) {
-        if (serverId != null && path != null) {
-            csvPathCache.put(serverId, path);
-            logger.debug("Tracked CSV path for server {}: {}", serverId, path);
+    private ParserPathTracker() {
+        serverPathCache = new ConcurrentHashMap<>();
+    }
+    
+    /**
+     * Get the singleton instance
+     * @return The singleton instance
+     */
+    public static synchronized ParserPathTracker getInstance() {
+        if (instance == null) {
+            instance = new ParserPathTracker();
         }
+        return instance;
     }
     
     /**
-     * Track a successful log path resolution
-     * @param serverId The unique server identifier
-     * @param path The resolved path
+     * Record a successful path resolution
+     * @param server The game server
+     * @param category The path category (csv or log)
+     * @param path The successful path
      */
-    public static void trackLogPath(String serverId, String path) {
-        if (serverId != null && path != null) {
-            logPathCache.put(serverId, path);
-            logger.debug("Tracked log path for server {}: {}", serverId, path);
+    public void recordPath(GameServer server, String category, String path) {
+        if (server == null || category == null || path == null) {
+            return;
         }
-    }
-    
-    /**
-     * Get a tracked CSV path
-     * @param serverId The unique server identifier
-     * @return The tracked path, or null if not found
-     */
-    public static String getCsvPath(String serverId) {
-        return serverId != null ? csvPathCache.get(serverId) : null;
-    }
-    
-    /**
-     * Get a tracked log path
-     * @param serverId The unique server identifier
-     * @return The tracked path, or null if not found
-     */
-    public static String getLogPath(String serverId) {
-        return serverId != null ? logPathCache.get(serverId) : null;
-    }
-    
-    /**
-     * Clear the path cache for testing
-     */
-    public static void clearCache() {
-        csvPathCache.clear();
-        logPathCache.clear();
-        logger.info("Path tracker cache cleared");
-    }
-    
-    /**
-     * Clear path cache for a specific server
-     * @param serverId The unique server identifier
-     */
-    public static void clearServerCache(String serverId) {
-        if (serverId != null) {
-            csvPathCache.remove(serverId);
-            logPathCache.remove(serverId);
-            logger.info("Path tracker cache cleared for server {}", serverId);
+        
+        String serverId = server.getServerId();
+        
+        if (serverId == null || serverId.isEmpty()) {
+            serverId = String.valueOf(server.getId());
         }
+        
+        String cacheKey = server.getGuildId() + "_" + serverId;
+        
+        serverPathCache.computeIfAbsent(cacheKey, k -> new HashMap<>())
+            .computeIfAbsent(category, k -> new ArrayList<>())
+            .add(path);
+        
+        logger.debug("Recorded successful {} path for server {}: {}", 
+            category, server.getName(), path);
     }
     
     /**
-     * Get a unique server identifier
-     * @param guildId Guild ID
-     * @param serverId Server ID
-     * @return Unique identifier
+     * Get recommended paths for a server and category
+     * @param server The game server
+     * @param category The path category
+     * @return List of recommended paths
      */
-    public static String getUniqueId(long guildId, String serverId) {
-        return guildId + ":" + serverId;
+    public List<String> getRecommendedPaths(GameServer server, String category) {
+        if (server == null || category == null) {
+            return new ArrayList<>();
+        }
+        
+        String serverId = server.getServerId();
+        
+        if (serverId == null || serverId.isEmpty()) {
+            serverId = String.valueOf(server.getId());
+        }
+        
+        String cacheKey = server.getGuildId() + "_" + serverId;
+        
+        Map<String, List<String>> categoryMap = serverPathCache.get(cacheKey);
+        
+        if (categoryMap == null) {
+            return new ArrayList<>();
+        }
+        
+        List<String> paths = categoryMap.get(category);
+        
+        if (paths == null) {
+            return new ArrayList<>();
+        }
+        
+        return new ArrayList<>(paths);
+    }
+    
+    /**
+     * Clear the path cache for a server
+     * @param server The game server
+     */
+    public void clearCache(GameServer server) {
+        if (server == null) {
+            return;
+        }
+        
+        String serverId = server.getServerId();
+        
+        if (serverId == null || serverId.isEmpty()) {
+            serverId = String.valueOf(server.getId());
+        }
+        
+        String cacheKey = server.getGuildId() + "_" + serverId;
+        
+        serverPathCache.remove(cacheKey);
+        
+        logger.debug("Cleared path cache for server {}", server.getName());
+    }
+    
+    /**
+     * Clear the entire path cache
+     */
+    public void clearAllCaches() {
+        serverPathCache.clear();
+        logger.debug("Cleared all path caches");
     }
 }

@@ -4,6 +4,7 @@
 /home/runner/workspace/src/main/java/com/deadside/bot/commands/admin/PathFixCommand.java
 /home/runner/workspace/src/main/java/com/deadside/bot/faction/FactionStatsSync.java
 /home/runner/workspace/src/main/java/com/deadside/bot/premium/PremiumManager.java
+/home/runner/workspace/src/main/java/com/deadside/bot/sftp/SftpUtils.java
 /home/runner/workspace/src/main/java/com/deadside/bot/parsers/fixes/DirectPathResolutionFix.java
 /home/runner/workspace/src/main/java/com/deadside/bot/isolation/IsolationManager.java
 /home/runner/workspace/src/main/java/com/deadside/bot/parsers/fixes/ParserPathAutoInitializer.java
@@ -18,6 +19,7 @@
 /home/runner/workspace/src/main/java/com/deadside/bot/premium/Tip4ServIntegration.java
 /home/runner/workspace/src/main/java/com/deadside/bot/commands/economy/BankCommand.java
 /home/runner/workspace/src/main/java/com/deadside/bot/db/models/LinkedPlayer.java
+/home/runner/workspace/src/main/java/com/deadside/bot/parsers/fixes/StatValidationFix.java
 /home/runner/workspace/src/main/java/com/deadside/bot/schedulers/KillfeedScheduler.java
 /home/runner/workspace/src/main/java/com/deadside/bot/commands/economy/BountyCommand.java
 /home/runner/workspace/src/main/java/com/deadside/bot/parsers/fixes/DeadsideParserFixEntrypoint.java
@@ -46,6 +48,7 @@
 /home/runner/workspace/src/main/java/com/deadside/bot/parsers/fixes/ParserPathWrapper.java
 /home/runner/workspace/src/main/java/com/deadside/bot/isolation/DataMigrationTool.java
 /home/runner/workspace/src/main/java/com/deadside/bot/db/models/GuildConfig.java
+/home/runner/workspace/src/main/java/com/deadside/bot/utils/GuildIsolationManagerExtension.java
 /home/runner/workspace/src/main/java/com/deadside/bot/integration/ParserPathSystemIntegrationHook.java
 /home/runner/workspace/src/main/java/com/deadside/bot/commands/stats/MatchupCommand.java
 /home/runner/workspace/src/main/java/com/deadside/bot/parsers/LogParser.java
@@ -143,8 +146,8 @@
 /home/runner/workspace/src/main/java/com/deadside/bot/isolation/IsolationValidationTest.java
 /home/runner/workspace/src/main/java/com/deadside/bot/isolation/IsolationCommandContext.java
 /home/runner/workspace/src/main/java/com/deadside/bot/utils/OwnerCheck.java
-/home/runner/workspace/src/main/java/com/deadside/bot/parsers/fixes/DeadsideParserValidator.java
 /home/runner/workspace/src/main/java/com/deadside/bot/parsers/fixes/ParserIsolationIntegration.java
+/home/runner/workspace/src/main/java/com/deadside/bot/parsers/fixes/DeadsideParserValidator.java
 /home/runner/workspace/src/main/java/com/deadside/bot/validation/ParserSystemValidator.java
 /home/runner/workspace/src/main/java/com/deadside/bot/commands/economy/WorkCommand.java
 /home/runner/workspace/src/main/java/com/deadside/bot/commands/admin/DatabaseResetCommand.java

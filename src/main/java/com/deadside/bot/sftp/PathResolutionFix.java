@@ -1,206 +1,129 @@
 package com.deadside.bot.sftp;
 
 import com.deadside.bot.db.models.GameServer;
-import com.deadside.bot.db.repositories.GameServerRepository;
+import com.deadside.bot.parsers.fixes.ParserIntegrationHooks;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Utility for resolving server file paths
- * Addresses path issues with Deadside.log and CSV files
+ * Provides improved path resolution for server log and CSV files
+ * This class integrates with the existing SFTP connector and adds
+ * fallback paths and discovery logic to handle different server configurations
  */
 public class PathResolutionFix {
     private static final Logger logger = LoggerFactory.getLogger(PathResolutionFix.class);
     
-    // Cache of successful paths to avoid repeated lookups
-    private static final Map<String, String> pathCache = new ConcurrentHashMap<>();
-    
-    // Default patterns for CSV directories
-    private static final List<String> CSV_PATTERNS = Arrays.asList(
-        "{host}_{server}/actual1/deathlogs",
-        "{host}_{server}/actual/deathlogs",
-        "{host}/{server}/actual1/deathlogs",
-        "{host}/{server}/actual/deathlogs",
-        "{server}/actual1/deathlogs",
-        "{server}/actual/deathlogs"
-    );
-    
-    // Default patterns for log directories
-    private static final List<String> LOG_PATTERNS = Arrays.asList(
-        "{host}_{server}/Logs",
-        "{host}_{server}/Deadside/Logs",
-        "{host}/{server}/Logs",
-        "{host}/{server}/Deadside/Logs",
-        "{server}/Logs",
-        "{server}/Deadside/Logs"
-    );
-    
     /**
-     * Resolve the CSV directory path for a server
+     * Find CSV files with fallback mechanisms
      * @param server The game server
      * @param connector The SFTP connector
-     * @return The resolved path, or original if not resolvable
+     * @return List of CSV files
      */
-    public static String resolveCsvPath(GameServer server, SftpConnector connector) {
-        if (server == null) {
+    public static List<String> findCsvFilesWithFallback(GameServer server, SftpConnector connector) {
+        try {
+            // First try the standard method
+            List<String> files = connector.findDeathlogFiles(server);
+            
+            if (files != null && !files.isEmpty()) {
+                // Record successful path
+                ParserIntegrationHooks.recordSuccessfulCsvPath(server, server.getDeathlogsDirectory());
+                return files;
+            }
+            
+            // If standard path failed, try alternative paths
+            List<String> alternativePaths = getAlternativeCsvPaths(server);
+            
+            for (String path : alternativePaths) {
+                logger.debug("Trying alternative CSV path: {}", path);
+                
+                // Update the server directory for the attempt
+                String originalPath = server.getDeathlogsDirectory();
+                server.setDeathlogsDirectory(path);
+                
+                try {
+                    files = connector.findDeathlogFiles(server);
+                    
+                    if (files != null && !files.isEmpty()) {
+                        // Record successful path
+                        ParserIntegrationHooks.recordSuccessfulCsvPath(server, path);
+                        return files;
+                    }
+                } catch (Exception e) {
+                    logger.debug("Error with alternative path {}: {}", path, e.getMessage());
+                } finally {
+                    // Restore original path
+                    server.setDeathlogsDirectory(originalPath);
+                }
+            }
+            
+            return new ArrayList<>();
+        } catch (Exception e) {
+            logger.error("Error finding CSV files with fallback: {}", e.getMessage(), e);
+            return new ArrayList<>();
+        }
+    }
+    
+    /**
+     * Find log file with fallback mechanisms
+     * @param server The game server
+     * @param connector The SFTP connector
+     * @return The log file path
+     */
+    public static String findLogFileWithFallback(GameServer server, SftpConnector connector) {
+        try {
+            // First try the standard method
+            String logFile = connector.findLogFile(server);
+            
+            if (logFile != null && !logFile.isEmpty()) {
+                // Record successful path
+                ParserIntegrationHooks.recordSuccessfulLogPath(server, server.getLogDirectory());
+                return logFile;
+            }
+            
+            // If standard path failed, try alternative paths
+            List<String> alternativePaths = getAlternativeLogPaths(server);
+            
+            for (String path : alternativePaths) {
+                logger.debug("Trying alternative log path: {}", path);
+                
+                // Update the server directory for the attempt
+                String originalPath = server.getLogDirectory();
+                server.setLogDirectory(path);
+                
+                try {
+                    logFile = connector.findLogFile(server);
+                    
+                    if (logFile != null && !logFile.isEmpty()) {
+                        // Record successful path
+                        ParserIntegrationHooks.recordSuccessfulLogPath(server, path);
+                        return logFile;
+                    }
+                } catch (Exception e) {
+                    logger.debug("Error with alternative path {}: {}", path, e.getMessage());
+                } finally {
+                    // Restore original path
+                    server.setLogDirectory(originalPath);
+                }
+            }
+            
+            return null;
+        } catch (Exception e) {
+            logger.error("Error finding log file with fallback: {}", e.getMessage(), e);
             return null;
         }
-        
-        // Get current path
-        String currentPath = server.getDeathlogsDirectory();
-        
-        try {
-            // Check if path is already valid
-            if (isValidCsvPath(currentPath) && testPath(server, currentPath, connector)) {
-                return currentPath;
-            }
-            
-            // Check cache first
-            String cacheKey = getCacheKey(server, "csv");
-            String cachedPath = pathCache.get(cacheKey);
-            
-            if (cachedPath != null) {
-                return cachedPath;
-            }
-            
-            // Try to find a valid path using patterns
-            String resolvedPath = findValidPathFromPatterns(server, CSV_PATTERNS, connector);
-            
-            if (resolvedPath != null) {
-                // Cache the successful path
-                pathCache.put(cacheKey, resolvedPath);
-                
-                logger.info("Resolved CSV path for server {}: {} -> {}", 
-                    server.getName(), currentPath, resolvedPath);
-                
-                return resolvedPath;
-            }
-            
-            // No resolution found, return original
-            return currentPath;
-        } catch (Exception e) {
-            logger.error("Error resolving CSV path for server {}: {}", 
-                server.getName(), e.getMessage());
-            return currentPath;
-        }
     }
     
     /**
-     * Resolve the log directory path for a server
+     * Get alternative CSV paths for a server
      * @param server The game server
-     * @param connector The SFTP connector
-     * @return The resolved path, or original if not resolvable
+     * @return List of alternative paths
      */
-    public static String resolveLogPath(GameServer server, SftpConnector connector) {
-        if (server == null) {
-            return null;
-        }
+    private static List<String> getAlternativeCsvPaths(GameServer server) {
+        List<String> paths = new ArrayList<>();
         
-        // Get current path
-        String currentPath = server.getLogDirectory();
-        
-        try {
-            // Check if path is already valid
-            if (isValidLogPath(currentPath) && testPath(server, currentPath, connector)) {
-                return currentPath;
-            }
-            
-            // Check cache first
-            String cacheKey = getCacheKey(server, "log");
-            String cachedPath = pathCache.get(cacheKey);
-            
-            if (cachedPath != null) {
-                return cachedPath;
-            }
-            
-            // Try to find a valid path using patterns
-            String resolvedPath = findValidPathFromPatterns(server, LOG_PATTERNS, connector);
-            
-            if (resolvedPath != null) {
-                // Cache the successful path
-                pathCache.put(cacheKey, resolvedPath);
-                
-                logger.info("Resolved log path for server {}: {} -> {}", 
-                    server.getName(), currentPath, resolvedPath);
-                
-                return resolvedPath;
-            }
-            
-            // No resolution found, return original
-            return currentPath;
-        } catch (Exception e) {
-            logger.error("Error resolving log path for server {}: {}", 
-                server.getName(), e.getMessage());
-            return currentPath;
-        }
-    }
-    
-    /**
-     * Fix paths for a specific server
-     * @param server The server to fix
-     * @param connector The SFTP connector
-     * @param repository The game server repository
-     * @return True if any paths were fixed
-     */
-    public static boolean fixServerPaths(GameServer server, 
-                                      SftpConnector connector,
-                                      GameServerRepository repository) {
-        if (server == null || server.hasRestrictedIsolation()) {
-            return false;
-        }
-        
-        boolean updated = false;
-        
-        try {
-            // Fix CSV path
-            String originalCsvPath = server.getDeathlogsDirectory();
-            String resolvedCsvPath = resolveCsvPath(server, connector);
-            
-            if (resolvedCsvPath != null && !resolvedCsvPath.equals(originalCsvPath)) {
-                server.setDeathlogsDirectory(resolvedCsvPath);
-                updated = true;
-            }
-            
-            // Fix log path
-            String originalLogPath = server.getLogDirectory();
-            String resolvedLogPath = resolveLogPath(server, connector);
-            
-            if (resolvedLogPath != null && !resolvedLogPath.equals(originalLogPath)) {
-                server.setLogDirectory(resolvedLogPath);
-                updated = true;
-            }
-            
-            // Save if updated
-            if (updated && repository != null) {
-                repository.save(server);
-                logger.info("Fixed paths for server {}: CSV: {} -> {}, Log: {} -> {}", 
-                    server.getName(), originalCsvPath, resolvedCsvPath, 
-                    originalLogPath, resolvedLogPath);
-            }
-            
-            return updated;
-        } catch (Exception e) {
-            logger.error("Error fixing paths for server {}: {}", 
-                server.getName(), e.getMessage());
-            return false;
-        }
-    }
-    
-    /**
-     * Find a valid path from a list of patterns
-     * @param server The game server
-     * @param patterns The list of patterns
-     * @param connector The SFTP connector
-     * @return The valid path, or null if not found
-     */
-    private static String findValidPathFromPatterns(GameServer server, 
-                                                List<String> patterns,
-                                                SftpConnector connector) {
         // Get server properties
         String host = server.getSftpHost();
         if (host == null || host.isEmpty()) {
@@ -212,81 +135,60 @@ public class PathResolutionFix {
             serverName = server.getName().replaceAll("\\s+", "_");
         }
         
-        // Try each pattern
-        for (String pattern : patterns) {
-            String path = pattern
-                .replace("{host}", host)
-                .replace("{server}", serverName);
-            
-            if (testPath(server, path, connector)) {
-                return path;
+        // Add alternative paths
+        paths.add(host + "_" + serverName + "/actual1/deathlogs");
+        paths.add(host + "_" + serverName + "/actual/deathlogs");
+        paths.add(host + "/" + serverName + "/actual1/deathlogs");
+        paths.add(host + "/" + serverName + "/actual/deathlogs");
+        paths.add(serverName + "/actual1/deathlogs");
+        paths.add(serverName + "/actual/deathlogs");
+        
+        // Add recommended paths from cache
+        List<String> recommendedPaths = ParserIntegrationHooks.getRecommendedCsvPaths(server);
+        for (String path : recommendedPaths) {
+            if (!paths.contains(path)) {
+                paths.add(path);
             }
         }
         
-        return null;
+        return paths;
     }
     
     /**
-     * Check if a path is a valid CSV path
-     * @param path The path to check
-     * @return True if valid
+     * Get alternative log paths for a server
+     * @param server The game server
+     * @return List of alternative paths
      */
-    private static boolean isValidCsvPath(String path) {
-        if (path == null || path.isEmpty()) {
-            return false;
+    private static List<String> getAlternativeLogPaths(GameServer server) {
+        List<String> paths = new ArrayList<>();
+        
+        // Get server properties
+        String host = server.getSftpHost();
+        if (host == null || host.isEmpty()) {
+            host = server.getHost();
         }
         
-        return path.contains("/actual1/deathlogs") || 
-               path.contains("\\actual1\\deathlogs") ||
-               path.contains("/actual/deathlogs") || 
-               path.contains("\\actual\\deathlogs");
-    }
-    
-    /**
-     * Check if a path is a valid log path
-     * @param path The path to check
-     * @return True if valid
-     */
-    private static boolean isValidLogPath(String path) {
-        if (path == null || path.isEmpty()) {
-            return false;
+        String serverName = server.getServerId();
+        if (serverName == null || serverName.isEmpty()) {
+            serverName = server.getName().replaceAll("\\s+", "_");
         }
         
-        return path.contains("/Logs") || 
-               path.contains("\\Logs");
-    }
-    
-    /**
-     * Test if a path exists
-     * @param server The server
-     * @param path The path to test
-     * @param connector The SFTP connector
-     * @return True if exists
-     */
-    private static boolean testPath(GameServer server, String path, SftpConnector connector) {
-        try {
-            return connector.testConnection(server, path);
-        } catch (Exception e) {
-            // Path doesn't exist or error
-            return false;
+        // Add alternative paths
+        paths.add(host + "_" + serverName + "/Logs");
+        paths.add(host + "_" + serverName + "/Deadside/Logs");
+        paths.add(host + "/" + serverName + "/Logs");
+        paths.add(host + "/" + serverName + "/Deadside/Logs");
+        paths.add(serverName + "/Logs");
+        paths.add(serverName + "/Deadside/Logs");
+        
+        // Add recommended paths from cache
+        List<String> recommendedPaths = ParserIntegrationHooks.getRecommendedLogPaths(server);
+        for (String path : recommendedPaths) {
+            if (!paths.contains(path)) {
+                paths.add(path);
+            }
         }
-    }
-    
-    /**
-     * Get a cache key for a server and type
-     * @param server The server
-     * @param type The path type (csv or log)
-     * @return The cache key
-     */
-    private static String getCacheKey(GameServer server, String type) {
-        return server.getGuildId() + ":" + server.getId() + ":" + type;
-    }
-    
-    /**
-     * Clear the path cache
-     * Mainly for testing
-     */
-    public static void clearCache() {
-        pathCache.clear();
+        
+        return paths;
     }
 }

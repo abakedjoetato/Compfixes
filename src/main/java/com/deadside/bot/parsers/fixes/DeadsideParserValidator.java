@@ -1,215 +1,157 @@
 package com.deadside.bot.parsers.fixes;
 
 import com.deadside.bot.db.models.GameServer;
+import com.deadside.bot.db.repositories.GameServerRepository;
+import com.deadside.bot.db.repositories.PlayerRepository;
+import com.deadside.bot.sftp.PathResolutionFix;
 import com.deadside.bot.sftp.SftpConnector;
-import com.jcraft.jsch.ChannelSftp;
-import com.jcraft.jsch.Session;
+import net.dv8tion.jda.api.JDA;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Vector;
+import java.util.List;
 
 /**
- * Validator for Deadside parser paths
- * This class provides methods for validating paths for both CSV and Log files
+ * Validator for Deadside server parsers
+ * This class helps diagnose and validate parser path configurations
  */
 public class DeadsideParserValidator {
     private static final Logger logger = LoggerFactory.getLogger(DeadsideParserValidator.class);
     
-    // File suffixes to check for
-    private static final String CSV_FILE_SUFFIX = ".csv";
-    private static final String LOG_FILE_NAME = "Deadside.log";
-    
-    // Maximum number of files to check
-    private static final int MAX_FILES_TO_CHECK = 100;
-    
-    // SFTP connector
+    private final JDA jda;
+    private final GameServerRepository serverRepository;
+    private final PlayerRepository playerRepository;
     private final SftpConnector sftpConnector;
     
     /**
      * Constructor
-     * @param sftpConnector The SFTP connector to use
+     * @param jda The JDA instance
+     * @param serverRepository The server repository
+     * @param playerRepository The player repository
+     * @param sftpConnector The SFTP connector
      */
-    public DeadsideParserValidator(SftpConnector sftpConnector) {
+    public DeadsideParserValidator(JDA jda, GameServerRepository serverRepository, 
+                                 PlayerRepository playerRepository, SftpConnector sftpConnector) {
+        this.jda = jda;
+        this.serverRepository = serverRepository;
+        this.playerRepository = playerRepository;
         this.sftpConnector = sftpConnector;
     }
     
     /**
-     * Validate a CSV path for a server
-     * @param server The game server
-     * @param path The path to validate
-     * @return True if the path is valid and contains CSV files
+     * Validate a server configuration
+     * @param server The server to validate
+     * @return Validation results
      */
-    public boolean validateCsvPath(GameServer server, String path) {
-        if (server == null || path == null || path.isEmpty()) {
-            return false;
-        }
+    public ValidationResults validateServer(GameServer server) {
+        ValidationResults results = new ValidationResults();
         
         try {
-            if (!connectAndValidate(server, path, CSV_FILE_SUFFIX, true)) {
-                return false;
+            // Basic connection test
+            boolean connectionOk = sftpConnector.testConnection(server);
+            results.setConnectionStatus(connectionOk);
+            
+            if (!connectionOk) {
+                logger.warn("Connection test failed for server {}", server.getName());
+                results.addIssue("Connection test failed");
+                return results;
             }
             
-            // If we got here, the path is valid and contains CSV files
-            logger.debug("Valid CSV path found for server {}: {}", server.getName(), path);
+            // CSV file discovery test
+            List<String> csvFiles = PathResolutionFix.findCsvFilesWithFallback(server, sftpConnector);
             
-            // Record the successful path
-            ParserPathTracker.getInstance().recordSuccessfulPath(
-                server, ParserPathTracker.CATEGORY_CSV, path);
+            if (csvFiles.isEmpty()) {
+                logger.warn("No CSV files found for server {}", server.getName());
+                results.addIssue("No CSV files found");
+                results.setCsvFilesFound(false);
+            } else {
+                logger.info("Found {} CSV files for server {}", csvFiles.size(), server.getName());
+                results.setCsvFilesFound(true);
+                results.setCsvFileCount(csvFiles.size());
+            }
             
-            return true;
+            // Log file discovery test
+            String logFile = PathResolutionFix.findLogFileWithFallback(server, sftpConnector);
+            
+            if (logFile == null || logFile.isEmpty()) {
+                logger.warn("No log file found for server {}", server.getName());
+                results.addIssue("No log file found");
+                results.setLogFileFound(false);
+            } else {
+                logger.info("Found log file for server {}: {}", server.getName(), logFile);
+                results.setLogFileFound(true);
+            }
+            
+            // Overall validity
+            boolean isValid = connectionOk && results.isCsvFilesFound() && results.isLogFileFound();
+            results.setIsValid(isValid);
+            
+            return results;
         } catch (Exception e) {
-            logger.debug("Error validating CSV path for server {}: {}", 
-                server.getName(), e.getMessage());
-            return false;
+            logger.error("Error validating server {}: {}", server.getName(), e.getMessage(), e);
+            results.addIssue("Validation error: " + e.getMessage());
+            results.setIsValid(false);
+            return results;
         }
     }
     
     /**
-     * Validate a Log path for a server
-     * @param server The game server
-     * @param path The path to validate
-     * @return True if the path is valid and contains the Deadside.log file
+     * Validation results class
      */
-    public boolean validateLogPath(GameServer server, String path) {
-        if (server == null || path == null || path.isEmpty()) {
-            return false;
+    public static class ValidationResults {
+        private boolean isValid;
+        private boolean connectionStatus;
+        private boolean csvFilesFound;
+        private boolean logFileFound;
+        private int csvFileCount;
+        private final List<String> issues = new java.util.ArrayList<>();
+        
+        public boolean isValid() {
+            return isValid;
         }
         
-        try {
-            if (!connectAndValidate(server, path, LOG_FILE_NAME, false)) {
-                return false;
-            }
-            
-            // If we got here, the path is valid and contains the Deadside.log file
-            logger.debug("Valid Log path found for server {}: {}", server.getName(), path);
-            
-            // Record the successful path
-            ParserPathTracker.getInstance().recordSuccessfulPath(
-                server, ParserPathTracker.CATEGORY_LOG, path);
-            
-            return true;
-        } catch (Exception e) {
-            logger.debug("Error validating Log path for server {}: {}", 
-                server.getName(), e.getMessage());
-            return false;
-        }
-    }
-    
-    /**
-     * Connect to a server and validate a path
-     * @param server The game server
-     * @param path The path to validate
-     * @param filePattern The file pattern to look for
-     * @param isSuffix Whether the pattern is a suffix
-     * @return True if the path is valid and contains matching files
-     */
-    private boolean connectAndValidate(GameServer server, String path, 
-                                    String filePattern, boolean isSuffix) {
-        Session session = null;
-        ChannelSftp channel = null;
-        
-        try {
-            // Connect to the server
-            session = sftpConnector.connect(server);
-            channel = sftpConnector.openChannel(session);
-            
-            // Navigate to the path
-            channel.cd(path);
-            
-            // Get the file list
-            @SuppressWarnings("unchecked")
-            Vector<ChannelSftp.LsEntry> fileList = channel.ls(".");
-            
-            if (fileList == null || fileList.isEmpty()) {
-                logger.debug("No files found in path {} for server {}", 
-                    path, server.getName());
-                return false;
-            }
-            
-            // Check for matching files
-            boolean foundMatchingFile = false;
-            int filesChecked = 0;
-            
-            for (ChannelSftp.LsEntry entry : fileList) {
-                if (filesChecked >= MAX_FILES_TO_CHECK) {
-                    break;
-                }
-                
-                String filename = entry.getFilename();
-                
-                // Skip . and ..
-                if (filename.equals(".") || filename.equals("..")) {
-                    continue;
-                }
-                
-                // Check if the file matches the pattern
-                if (isSuffix) {
-                    // Check if the file ends with the pattern
-                    if (filename.endsWith(filePattern)) {
-                        foundMatchingFile = true;
-                        break;
-                    }
-                } else {
-                    // Check if the file matches the pattern exactly
-                    if (filename.equals(filePattern)) {
-                        foundMatchingFile = true;
-                        break;
-                    }
-                }
-                
-                filesChecked++;
-            }
-            
-            if (!foundMatchingFile) {
-                logger.debug("No matching files found in path {} for server {}", 
-                    path, server.getName());
-                return false;
-            }
-            
-            return true;
-        } catch (Exception e) {
-            logger.debug("Error connecting to or validating path {} for server {}: {}", 
-                path, server.getName(), e.getMessage());
-            return false;
-        } finally {
-            // Close the channel and session
-            sftpConnector.closeChannel(channel);
-            sftpConnector.disconnect(session);
-        }
-    }
-    
-    /**
-     * Test if a server path exists
-     * @param server The game server
-     * @param path The path to test
-     * @return True if the path exists
-     */
-    public boolean testPathExists(GameServer server, String path) {
-        if (server == null || path == null || path.isEmpty()) {
-            return false;
+        public void setIsValid(boolean isValid) {
+            this.isValid = isValid;
         }
         
-        Session session = null;
-        ChannelSftp channel = null;
+        public boolean isConnectionStatus() {
+            return connectionStatus;
+        }
         
-        try {
-            // Connect to the server
-            session = sftpConnector.connect(server);
-            channel = sftpConnector.openChannel(session);
-            
-            // Try to navigate to the path
-            channel.cd(path);
-            
-            // If we got here, the path exists
-            return true;
-        } catch (Exception e) {
-            // Path doesn't exist or error occurred
-            return false;
-        } finally {
-            // Close the channel and session
-            sftpConnector.closeChannel(channel);
-            sftpConnector.disconnect(session);
+        public void setConnectionStatus(boolean connectionStatus) {
+            this.connectionStatus = connectionStatus;
+        }
+        
+        public boolean isCsvFilesFound() {
+            return csvFilesFound;
+        }
+        
+        public void setCsvFilesFound(boolean csvFilesFound) {
+            this.csvFilesFound = csvFilesFound;
+        }
+        
+        public boolean isLogFileFound() {
+            return logFileFound;
+        }
+        
+        public void setLogFileFound(boolean logFileFound) {
+            this.logFileFound = logFileFound;
+        }
+        
+        public int getCsvFileCount() {
+            return csvFileCount;
+        }
+        
+        public void setCsvFileCount(int csvFileCount) {
+            this.csvFileCount = csvFileCount;
+        }
+        
+        public List<String> getIssues() {
+            return new java.util.ArrayList<>(issues);
+        }
+        
+        public void addIssue(String issue) {
+            issues.add(issue);
         }
     }
 }

@@ -5,86 +5,100 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Integration hooks for parsers
- * This class provides integration hooks for the CSV and Log parsers
- * to use the path resolution system
+ * Integration hooks for parser path fixes
+ * Provides integration points between the enhanced SFTP connector and
+ * the path tracking system
  */
 public class ParserIntegrationHooks {
     private static final Logger logger = LoggerFactory.getLogger(ParserIntegrationHooks.class);
     
     /**
-     * Get the CSV file path for a server
-     * This method is called by the CSV parser to get the path
-     * @param server The game server
-     * @param originalPath The original path from the server
-     * @return The resolved path
-     */
-    public static String getCsvFilePath(GameServer server, String originalPath) {
-        try {
-            // Call the integration manager if available
-            if (ParserPathIntegrationManager.getInstance().isInitialized()) {
-                return ParserPathIntegrationManager.getInstance().onCsvParserGetPath(server, originalPath);
-            }
-            
-            // Otherwise, just return the original path
-            return originalPath;
-        } catch (Exception e) {
-            logger.error("Error in CSV path hook: {}", e.getMessage(), e);
-            return originalPath;
-        }
-    }
-    
-    /**
-     * Get the Log file path for a server
-     * This method is called by the Log parser to get the path
-     * @param server The game server
-     * @param originalPath The original path from the server
-     * @return The resolved path
-     */
-    public static String getLogFilePath(GameServer server, String originalPath) {
-        try {
-            // Call the integration manager if available
-            if (ParserPathIntegrationManager.getInstance().isInitialized()) {
-                return ParserPathIntegrationManager.getInstance().onLogParserGetPath(server, originalPath);
-            }
-            
-            // Otherwise, just return the original path
-            return originalPath;
-        } catch (Exception e) {
-            logger.error("Error in Log path hook: {}", e.getMessage(), e);
-            return originalPath;
-        }
-    }
-    
-    /**
      * Record a successful CSV path for a server
-     * This method should be called by the CSV parser when a path is successful
      * @param server The game server
      * @param path The successful path
      */
     public static void recordSuccessfulCsvPath(GameServer server, String path) {
         try {
-            // Record the successful path
-            ParserPathTracker.getInstance().recordSuccessfulPath(
-                server, ParserPathTracker.CATEGORY_CSV, path);
+            if (server == null || path == null || path.isEmpty()) {
+                return;
+            }
+            
+            ParserPathTracker.getInstance().recordPath(
+                server, 
+                ParserPathTracker.CATEGORY_CSV, 
+                path
+            );
+            
+            logger.debug("Recorded successful CSV path for server {}: {}", 
+                server.getName(), path);
         } catch (Exception e) {
             logger.error("Error recording successful CSV path: {}", e.getMessage(), e);
         }
     }
     
     /**
-     * Record a successful Log path for a server
-     * This method should be called by the Log parser when a path is successful
+     * Record a successful log path for a server
      * @param server The game server
      * @param path The successful path
      */
     public static void recordSuccessfulLogPath(GameServer server, String path) {
         try {
-            // Record the successful path
-            ParserPathTracker.getInstance().recordSuccessfulPath(
-                server, ParserPathTracker.CATEGORY_LOG, path);
+            if (server == null || path == null || path.isEmpty()) {
+                return;
+            }
+            
+            ParserPathTracker.getInstance().recordPath(
+                server, 
+                ParserPathTracker.CATEGORY_LOG, 
+                path
+            );
+            
+            logger.debug("Recorded successful log path for server {}: {}", 
+                server.getName(), path);
         } catch (Exception e) {
-            logger.error("Error recording successful Log path: {}", e.getMessage(), e);
+            logger.error("Error recording successful log path: {}", e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Get recommended CSV paths for a server
+     * @param server The game server
+     * @return The recommended paths
+     */
+    public static java.util.List<String> getRecommendedCsvPaths(GameServer server) {
+        try {
+            if (server == null) {
+                return new java.util.ArrayList<>();
+            }
+            
+            return ParserPathTracker.getInstance().getRecommendedPaths(
+                server, 
+                ParserPathTracker.CATEGORY_CSV
+            );
+        } catch (Exception e) {
+            logger.error("Error getting recommended CSV paths: {}", e.getMessage(), e);
+            return new java.util.ArrayList<>();
+        }
+    }
+    
+    /**
+     * Get recommended log paths for a server
+     * @param server The game server
+     * @return The recommended paths
+     */
+    public static java.util.List<String> getRecommendedLogPaths(GameServer server) {
+        try {
+            if (server == null) {
+                return new java.util.ArrayList<>();
+            }
+            
+            return ParserPathTracker.getInstance().getRecommendedPaths(
+                server, 
+                ParserPathTracker.CATEGORY_LOG
+            );
+        } catch (Exception e) {
+            logger.error("Error getting recommended log paths: {}", e.getMessage(), e);
+            return new java.util.ArrayList<>();
         }
     }
 }
